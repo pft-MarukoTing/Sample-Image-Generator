@@ -42,7 +42,7 @@ Parent checkboxes select all descendants; partially selected groups show a mixed
 
 Random mixes vary settings across images; larger batches repeat the available options. Ratios and regional background assignments are consistent between copied prompts and API jobs. User-entered text is preserved, including non-English requests.
 
-## OpenAI API mode
+## OpenAI API mode (local / persistent single-process server)
 
 Choose **My API key**, enter your own OpenAI API key, and generate inside the app. Only OpenAI is currently implemented as an API provider; the Gemini option opens its website and is not an API integration.
 
@@ -67,7 +67,8 @@ Company mode stays unavailable until both the account configuration and company 
 | `COMPANY_USERS_JSON` | Account configuration containing salts, scrypt hashes, initial image quotas, and admin flags. |
 | `OPENAI_IMAGE_MODEL` | Optional model override; defaults to `gpt-image-2`. |
 | `PORT` | Optional listen port; defaults to `4173`. |
-| `DATA_DIR` | Optional persistent storage directory; defaults to `data/`. |
+| `DATA_DIR` | Local server storage directory; defaults to `data/`. Ignored on Vercel. Durability depends on the hosting disk. |
+| `ALLOWED_HOSTS` | Comma-separated additional trusted hostnames (no scheme or port), for custom domains / reverse proxies. |
 | `COOKIE_SECURE=1` | Enable Secure cookies behind an HTTPS reverse proxy. |
 
 Generate an account configuration with Python 3:
@@ -92,14 +93,46 @@ Account workspaces are private. Administrators can change image quotas in Advanc
 - Company keys come only from server environment variables.
 - Private image routes validate the HttpOnly, SameSite session cookie. JSON mutations enforce origin checks.
 - `data/` contains private task records and images and is excluded from Git. It must not be publicly served. Image and task data are not encrypted at rest by this application.
-- The server binds only to `127.0.0.1` and accepts `localhost` / `127.0.0.1` host headers. It is not an Internet-ready deployment by default.
-- Production requires an HTTPS reverse proxy, secure cookies, persistent storage, backups, retention policies, capacity limits, monitoring, and provider billing reconciliation. Preserve the localhost upstream Host header.
+- The local server binds to `127.0.0.1`. Trusted hosts include localhost, explicit `ALLOWED_HOSTS`, and Vercel deployment / production / branch hostnames supplied by Vercel. Cross-origin API requests are rejected.
+- A persistent single-process deployment requires an HTTPS reverse proxy, secure cookies, a persistent disk, backups, retention policies, capacity limits, monitoring, and provider billing reconciliation. Configure its domain in `ALLOWED_HOSTS`.
 - JSON file storage and in-process quota/queue locking support one Node process. Before horizontal scaling, migrate to database transactions, a durable queue, object storage, and distributed locking.
 - For company-wide use, replace the local account configuration with your organization's SSO/OIDC and account management. Long-term personal-key storage would require encryption and a managed key service.
+
+## Vercel deployment
+
+The repository includes an explicit Node Function entry (`api/index.mjs`) and `vercel.json` routing. Static UI assets are included in the function bundle. `server.mjs` exports the handler; importing it on Vercel does not call `listen()`.
+
+The deployment filesystem (`/var/task`) is read-only. Setting `DATA_DIR=data` or moving `state.json` to `/tmp` does **not** provide persistent storage. `/tmp` can disappear at cold start/redeployment and is not shared between function instances. In-memory sessions, keys, quotas, duplicate-request IDs, and fire-and-forget queues also cannot provide reliable distributed generation.
+
+**Current Vercel release is deliberately stateless:**
+
+- The homepage, filters, prompt copying, and Open ChatGPT / Open Gemini work normally.
+- Form preferences remain in that browser's localStorage. Clearing browser data removes them; they are not synced across devices.
+- Images and History are **not stored by this deployment**, even temporarily. Generate and download photos in ChatGPT/Gemini. This app cannot retrieve that platform's photo history.
+- `/api/state` returns an empty workspace with explicit storage capabilities; no workspace cookie or server file is created.
+- My API key is disabled, company mode is unavailable, and the backend rejects writes/uploads/key submissions/generation with `503 DURABLE_STORAGE_REQUIRED`, before accepting credentials or calling any paid provider. Advanced settings show an explanation.
+- Existing local `data/` remains unchanged and is never uploaded to Git/Vercel. Setting API environment variables alone does not enable hosted paid generation.
+
+Push to the linked production branch to trigger Vercel's existing Git integration. Use Node.js 22 or newer; do not configure a start command or output directory. The checked-in `builds`/`routes` configuration selects the Node function. For a custom domain not included in Vercel's production URL variables, add its hostname to `ALLOWED_HOSTS` and redeploy. No new storage subscription or credentials are required for this stateless release.
+
+### Durable storage design (evaluated; not implemented / provisioned)
+
+| Data | Recommended service | Required behavior |
+| --- | --- | --- |
+| Image bytes and old versions | **Private Vercel Blob** | Private objects with owner IDs; authenticated download authorization for every request; stream or short-lived access; never expose the storage token. |
+| History, prompts, version pointers, job state, users, quota and idempotency IDs | **Managed Postgres**, e.g. Neon through Vercel Marketplace | Owner-scoped queries, transactions, unique request IDs, atomic quota reservations, migrations and backups. |
+| Batch jobs | A durable workflow/queue, e.g. Vercel Workflow | Persist each image job, leases/attempts and uncertain provider outcomes; do not automatically repeat potentially billed calls after a timeout. |
+| Login and personal keys | SSO/OIDC plus encrypted secrets store | Durable identity/session handling; owner-scoped key access/deletion; managed encryption key; no keys in logs or history. |
+
+Blob alone is insufficient: storing one shared `state.json` object introduces concurrent overwrite, quota, and duplicate-billing races. Before enabling hosted API mode, implement and test these adapters and authenticated direct uploads (Vercel Functions have request/response payload limits), migrate local records and images explicitly, configure storage/database/queue/auth secrets through Vercel, and verify retention, isolation, restart recovery and billing reconciliation. Adding environment variables is not a substitute for that work. These services have their own billing; none were provisioned as part of this fix.
+
+Official references: [Function files and storage](https://vercel.com/kb/guide/how-can-i-use-files-in-serverless-functions), [Vercel storage options](https://vercel.com/docs/storage), [Private Blob](https://vercel.com/docs/vercel-blob/private-storage), [Function limits](https://vercel.com/docs/functions/limitations), [Background work](https://vercel.com/docs/functions/functions-api-reference/vercel-functions-package).
 
 ## Project layout
 
 ```text
+api/index.mjs         Vercel default-export handler entry
+vercel.json           Explicit function build, assets and routing
 server.mjs            HTTP server, sessions, accounts, quotas, jobs, private files
 planner.mjs           Validated batch planning and prompt expansion
 providers.mjs         Mock / personal / company provider adapters

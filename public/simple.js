@@ -49,6 +49,13 @@ function updateSummary() {
   if (f.gender === 'mixed' && Number(f.count) % 2 === 1) $('#summary').textContent += ' (one extra female image)';
 }
 function render() {
+  const unavailable=state.storage?.apiGenerationAvailable===false;
+  if(unavailable){source='manual';localStorage.setItem('source','manual');}
+  $('#storage-notice').hidden=!unavailable;
+  $('#storage-notice').textContent=unavailable?state.storage.message:'';
+  const apiMethod=document.querySelector('[data-method="personal"]');
+  apiMethod.disabled=unavailable;
+  apiMethod.title=unavailable?'Requires durable storage and a job queue on this deployment.':'';
   const manual=source==='manual';
   $('#api-results').hidden=manual;
   $('#manual-workflow').hidden=!manual;
@@ -73,6 +80,7 @@ function render() {
 }
 async function refresh() { const next = await api('state'); if (JSON.stringify(next) !== JSON.stringify(state)) { state = next; render(); } }
 function connectionSettings() {
+  if(state.storage?.apiGenerationAvailable===false){modal(`<h2>ChatGPT / Gemini</h2><p>${esc(state.storage.message)}</p><div class="buttons"><button data-close>Close</button></div>`);return;}
   modal(`<h2>Generation method</h2><p>Use ChatGPT or Gemini without an API key: copy the prompt, then generate and download photos in your preferred AI app.</p><form id="connection-form">${[['manual','ChatGPT / Gemini','No API key. Paste the prompt into your chosen AI app.'],['personal','Personal OpenAI API','Billed to your API account'],...(state.companyReady?[['company','Company API',state.account?`Signed in as ${state.account}`:'Sign in to use company billing']]:[])].map(([id,label,desc])=>`<label class="source-option"><input type="radio" name="source" value="${id}" ${source===id?'checked':''}><span>${esc(label)}<br><small>${esc(desc)}</small></span></label>`).join('')}<div id="key-section" ${source==='personal'?'':'hidden'}><h3>OpenAI API Key</h3><p>${state.keyReady?'A key is configured. Leave blank to keep it.':'Not configured. Keys are kept in server memory only.'} ChatGPT subscriptions do not include API credits.</p><input name="key" type="password" autocomplete="off" placeholder="Enter API key" aria-label="OpenAI API Key">${state.keyReady?'<button type="button" id="delete-key">Delete saved key</button>':''}</div><div id="company-section" ${source==='company'&&!state.account?'':'hidden'}><h3>Company account</h3><input name="username" autocomplete="username" placeholder="Company account" aria-label="Company account"><input name="password" type="password" autocomplete="current-password" placeholder="Password" aria-label="Company password"></div><p id="connection-error" class="error" role="alert"></p><div class="buttons"><button type="button" data-close>Cancel</button><button class="primary">Save</button></div></form><p><a href="/advanced.html">Advanced settings</a><small> · Asset list, import / export, and admin settings</small></p>`);
 }
 function paymentDescription(count) { return `<p>${count} images · ${sourceNames[source]}<br>Billed to: ${source==='company'?'Company':'Your API account'}<br>Estimated cost: unavailable. Billed by actual API usage.</p>`; }

@@ -32,3 +32,13 @@ ZIP output was separately checked for UTF-8 filenames, CRC integrity, and matchi
 ## Limits
 
 No real API key was provided, so live paid generation, actual provider/account model-size compatibility, and invoice reconciliation remain unverified. No public deployment or multi-user load testing has been performed. See README for production requirements.
+
+
+## Vercel filesystem regression (2026-10-27)
+
+- `npm test`: 15 passing tests, including the existing local queue, image versions/uploads, private downloads, key deletion, company authentication/quota and planner/provider contracts. No paid image API was called.
+- New serverless test imports the exact `api/index.mjs` entry with `VERCEL=1`, a forbidden `/var/task/data` override, and filesystem writes instrumented to throw. Cold start, homepage and JS/CSS modules work without writing files.
+- Production/preview Host headers and same-origin requests work; untrusted hosts/origins are rejected.
+- Stateless state creates no cookie and returns no shared History; all write/key/upload/generation endpoints are blocked before credentials or billing.
+- Browser check in Vercel mode: homepage renders the storage notice and disabled API method; Hair Bang example -> Copy image prompt succeeds; ChatGPT/Gemini links remain available.
+- Persistent Blob/Postgres/queue integration is not implemented. Vercel mode intentionally does not store images or History. Deployment status is verified separately through the linked GitHub/Vercel check after push.

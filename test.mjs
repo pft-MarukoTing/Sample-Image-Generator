@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
+import http from 'node:http';
 import {providers} from './providers.mjs';
 const row={id:'HB-001',category:'Hair Bang',scene:'女性短髮',purpose:'功能測試',prompt:'Single adult portrait',width:1024,height:768};
 test('provider contract: one image, server-only credentials, sanitized errors',async()=>{let payload;let result=await providers.personal.generate({row,settings:{constraints:'no text'},key:'test-key',fetcher:async(url,options)=>{payload=JSON.parse(options.body);assert.equal(url,'https://api.openai.com/v1/images/generations');assert.equal(options.headers.Authorization,'Bearer test-key');return {ok:true,json:async()=>({data:[{b64_json:Buffer.from('test-image').toString('base64')}]})}}});assert.equal(payload.n,1);assert.equal(payload.size,'1024x768');assert.match(payload.prompt,/no text/);assert.equal(result.bytes.toString(),'test-image');await assert.rejects(providers.personal.generate({row,settings:{},key:'secret',fetcher:async()=>({ok:false,status:429})}),/429/);});
@@ -45,4 +46,32 @@ await new Promise(r=>setTimeout(r,2300));s=(await request('state')).body;assert.
 const manual={...payload,requirement:'自訂名字',count:1,source:'manual',requestId:'manual-simple-batch'};assert.equal((await request('batch',manual)).status,200);s=(await request('state')).body;assert.equal(s.rows.find(r=>s.latestBatch.ids.includes(r.id)).status,'draft');assert.equal((await request('batch',{...payload,source:'personal',requestId:'unconfigured-personal'})).status,400);
 });
 await t.test('company login, quota checks and admin authorization',async()=>{assert.equal((await request('generate',{ids:['HB-001'],source:'company',requestId:'unauthorized'})).status,400);assert.equal((await request('login',{username:'admin',password:'wrong'})).status,400);assert.equal((await request('login',{username:'admin',password:'test-password'})).status,200);assert.equal((await request('state')).body.admin,true);await request('save',{rows:[row],settings:{}});assert.equal((await request('generate',{ids:['HB-001'],source:'company',requestId:'over-quota'})).status,400);assert.equal((await request('quota',{account:'admin',quota:3})).status,200);assert.equal((await request('state')).body.quota,3);await request('logout',{});assert.equal((await request('state')).body.account,undefined);await request('login',{username:'coworker',password:'other-password'});assert.equal((await request('quota',{account:'admin',quota:100})).status,403);assert.equal((await request('state')).body.rows.length,0)});
+});
+
+test('Vercel entry: read-only filesystem, homepage/assets, stateless privacy and billing guard',async t=>{
+  const script=`import fs from 'node:fs';
+    // A serverless cold start must not write anywhere, including /var/task/data.
+    for(const name of ['mkdirSync','writeFileSync','renameSync'])fs[name]=()=>{throw Error('Unexpected filesystem write: '+name)};
+    const {default:handler}=await import('./api/index.mjs');
+    const {createServer}=await import('node:http');
+    createServer(handler).listen(4175,'127.0.0.1');`;
+  const child=spawn(process.execPath,['--input-type=module','-e',script],{cwd:process.cwd(),env:{...process.env,VERCEL:'1',VERCEL_URL:'preview.example.vercel.app',VERCEL_PROJECT_PRODUCTION_URL:'sample.example.com',DATA_DIR:'/var/task/data',OPENAI_API_KEY:'must-not-be-used',COMPANY_USERS_JSON:'{}'},stdio:['ignore','pipe','pipe']});
+  let errors='';child.stderr.on('data',c=>errors+=c);t.after(()=>child.kill());
+  async function call(route,body,headers={}){return new Promise((resolve,reject)=>{const req=http.request({hostname:'127.0.0.1',port:4175,path:route,method:body?'POST':'GET',headers:{host:'sample.example.com',...(body?{'Content-Type':'application/json'}:{}),...headers}},res=>{const chunks=[];res.on('data',c=>chunks.push(c));res.on('end',()=>resolve(new Response(Buffer.concat(chunks),{status:res.statusCode,headers:res.headers})));});req.on('error',reject);req.end(body?JSON.stringify(body):undefined);});}
+  let ready=false;for(let i=0;i<60;i++){try{if((await call('/')).ok){ready=true;break}}catch{}await new Promise(r=>setTimeout(r,50))}assert.ok(ready,errors);
+  const home=await call('/');assert.equal(home.status,200);assert.match(await home.text(),/Generate Sample Images/);
+  for(const asset of ['/simple.js','/simple.css','/chatgpt-prompt.js','/backgrounds.js','/advanced.html'])assert.equal((await call(asset)).status,200,asset);
+  assert.equal((await call('/missing-file')).status,404);
+  assert.equal((await call('/',undefined,{host:'preview.example.vercel.app'})).status,200);
+  assert.equal((await call('/',undefined,{host:'untrusted.example'})).status,403);
+  assert.equal((await call('/api/state',undefined,{origin:'https://untrusted.example'})).status,403);
+  const response=await call('/api/state');assert.equal(response.status,200);assert.equal(response.headers.get('set-cookie'),null);
+  const state=await response.json();assert.equal(state.storage.persistent,false);assert.equal(state.storage.mode,'stateless');assert.equal(state.storage.apiGenerationAvailable,false);assert.equal(state.companyReady,false);assert.equal(state.keyReady,false);assert.deepEqual(state.rows,[]);
+  for(const route of ['key','batch','generate','save','upload','login','quota']){
+    const r=await call('/api/'+route,{source:'personal',key:'must-not-save',requestId:'vercel-test'}, {origin:'https://sample.example.com'});
+    assert.equal(r.status,503,route);assert.equal((await r.json()).code,'DURABLE_STORAGE_REQUIRED');
+  }
+  assert.equal((await call('/api/image?id=private&v=private')).status,503);
+  assert.deepEqual((await (await call('/api/state')).json()).rows,[]);
+  assert.equal(errors,'');
 });
