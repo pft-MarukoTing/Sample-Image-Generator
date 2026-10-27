@@ -1,0 +1,14 @@
+# Private runtime records and generated images
+/data/
+# Secrets and local environment configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+# Dependencies, logs, and OS/editor files
+node_modules/
+*.log
+.DS_Store
+.vscode/
+.idea/

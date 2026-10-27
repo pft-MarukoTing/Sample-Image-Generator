@@ -1,0 +1,13 @@
+{
+  "name": "sample-images-studio",
+  "version": "2.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "node --test test.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "type": "module"
+}
