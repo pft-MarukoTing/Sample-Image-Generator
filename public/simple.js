@@ -1,3 +1,4 @@
+import {resolveStudioBackground} from './studio-background.js';
 import {enhanceSelect,closeSelectMenus} from './select-menu.js';
 import {backgroundTree,backgroundLeaves,normalizeBackgrounds,backgroundSummary} from './backgrounds.js';
 import {clothingStyles,seasons} from './wardrobe.js';
@@ -35,8 +36,9 @@ function currentRows() { const ids = new Set(state.latestBatch?.ids || []); retu
 function imageURL(row, version = row.active) { return `/api/image?id=${encodeURIComponent(row.id)}&v=${encodeURIComponent(version)}`; }
 function updateSummary() {
   const f = inputValues(), active = source!=='manual'&&state?.rows.some(r => ['queued','running'].includes(r.status));
-  document.querySelector('.background-picker>p').textContent=f.regionalBackgrounds.length>Number(f.count)?`${f.regionalBackgrounds.length} backgrounds selected for ${f.count} images. Some will not appear.`:'Choose regions or countries. Selections vary across images.';
-  $('#summary').textContent = `${f.count || '—'} images · ${names[f.gender]} · ${f.ageMin || '0'}–${f.ageMax || '0'} yrs · ${names[f.framing]} · ${names[f.background]} · ${f.aspectRatio==='random'?'Random ratios':f.aspectRatio||'4:3'}`;
+  document.querySelector('.background-picker>p').textContent=f.regionalBackgrounds.length>Number(f.count)?`${f.regionalBackgrounds.length} origins selected for ${f.count} images. Some will not appear.`:'Choose people’s ethnic or regional origins, not the photo setting.';
+  $('#background-tone').hidden=f.background!=='clean';
+  $('#summary').textContent = `${f.count || '—'} images · ${names[f.gender]} · ${f.ageMin || '0'}–${f.ageMax || '0'} yrs · ${names[f.framing]} · ${resolveStudioBackground(f).label} · ${f.aspectRatio==='random'?'Random ratios':f.aspectRatio||'4:3'}`;
   if(f.regionalBackgrounds.length)$('#summary').textContent+=' · '+backgroundSummary(f.regionalBackgrounds);
   if(f.clothingStyle&&f.clothingStyle!=='request')$('#summary').textContent+=' · '+(f.clothingStyle==='random'?'Random style':clothingStyles[f.clothingStyle].label);
   if(f.season&&f.season!=='any')$('#summary').textContent+=' · '+(f.season==='random'?'Random season':seasons[f.season].label);

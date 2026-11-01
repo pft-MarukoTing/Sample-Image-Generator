@@ -28,7 +28,7 @@ This mode does not require an API key, create upload slots, or operate your Chat
 
 ## Image settings
 
-- **Background:** clean studio background or a natural setting.
+- **Background:** clean studio background with Light / Dark tone, or a natural setting. Tone is applied to both copied prompts and API jobs.
 - **Gender:** female, male, or a 50/50 split. With an odd count, one extra female image is assigned.
 - **Image count:** 1–100 per batch.
 - **Age range:** configurable minimum and maximum, 0–100.
@@ -36,7 +36,7 @@ This mode does not require an API key, create upload slots, or operate your Chat
 - **Aspect ratio:** 1:1, 4:3, 3:4, 16:9, 9:16, or Random mix. Default: 4:3.
 - **Clothing style:** follow request, formal, smart casual, casual, sporty, streetwear, or Random mix.
 - **Season:** any, spring, summer, autumn, winter, or Random mix.
-- **Regional background:** hierarchical multi-select, including Western, Latin American, Asian, African, and Middle Eastern backgrounds. Asian options include East, Southeast, and South Asian subgroups, with options such as Japanese, Korean, and Taiwanese backgrounds.
+- **Ethnicity / region:** hierarchical multi-select, including Western, Latin American, Asian, African, and Middle Eastern backgrounds. Asian options include East, Southeast, and South Asian subgroups, with options such as Japanese, Korean, and Taiwanese backgrounds.
 
 Parent checkboxes select all descendants; partially selected groups show a mixed state. Selecting broad regions distributes images across their subregions. Regional and cultural labels are not treated as fixed physical appearances. Clear the selection for no regional restriction.
 
@@ -143,3 +143,5 @@ test.mjs              Provider, planning, queue, isolation, and permission tests
 ```
 
 API references: [Image generation](https://developers.openai.com/api/docs/guides/image-generation), [Image edits](https://developers.openai.com/api/reference/resources/images/methods/edit).
+
+Framing icons use Lucide Scan Face, User Round, and Person Standing, embedded locally as SVG. See `LUCIDE-LICENSE.txt` for attribution and license.
