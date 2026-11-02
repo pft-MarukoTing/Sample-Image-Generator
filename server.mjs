@@ -11,7 +11,7 @@ const root=path.dirname(fileURLToPath(import.meta.url));
 const serverless=process.env.VERCEL==='1';
 const data=serverless?path.join(os.tmpdir(),'sample-images'):process.env.DATA_DIR||path.join(root,'data');
 if(!serverless)fs.mkdirSync(data,{recursive:true,mode:0o700});
-const storage={mode:serverless?'stateless':'local-files',persistent:!serverless,apiGenerationAvailable:!serverless,message:serverless?'This deployment supports ChatGPT / Gemini prompts only. Images and History are not stored here. Generate and download photos in your AI app. API generation requires durable storage and a job queue.':'History and images are stored on this server. Back up the data directory.'};
+const storage={mode:serverless?'stateless':'local-files',persistent:!serverless,apiGenerationAvailable:!serverless,message:serverless?'Copy the prompt and paste it into the AI image tool you use (ChatGPT, Gemini, or any other), then generate and download photos there. This deployment does not store images or History. My API key needs server storage and a job queue, which this hosted version does not have yet.':'History and images are stored on this server. Back up the data directory.'};
 const dbfile=path.join(data,'state.json');let db=!serverless&&fs.existsSync(dbfile)?JSON.parse(fs.readFileSync(dbfile)):{};const keys=new Map();let running=0;
 const accounts=JSON.parse(process.env.COMPANY_USERS_JSON||'{}'), authSessions=new Map(), loginAttempts=new Map();
 const companyReady=!serverless&&!!process.env.OPENAI_API_KEY&&Object.keys(accounts).length>0;

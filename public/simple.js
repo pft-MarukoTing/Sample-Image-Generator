@@ -1,7 +1,8 @@
-import {resolveStudioBackground} from './studio-background.js';
+import {resolveStudioBackground,backgroundSwatches,colorName} from './studio-background.js';
 import {enhanceSelect,closeSelectMenus} from './select-menu.js';
 import {backgroundTree,backgroundLeaves,normalizeBackgrounds,backgroundSummary} from './backgrounds.js';
 import {clothingStyles,seasons} from './wardrobe.js';
+import {productTypes,presentations,angles} from './products.js';
 import {displayScene,uiError} from './english.js';
 import {buildChatGPTPrompt} from './chatgpt-prompt.js';
 const $ = s => document.querySelector(s);
@@ -34,21 +35,48 @@ document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#background-men
 function isRealRow(row) { if(!['personal','company'].includes(row.source))return false; const version=row.versions.find(v=>v.id===row.active); return version ? version.source!=='mock' : ['personal','company','manual'].includes(row.source); }
 function currentRows() { const ids = new Set(state.latestBatch?.ids || []); return state.rows.filter(row => isRealRow(row) && (showHistory ? !ids.has(row.id) : ids.has(row.id))); }
 function imageURL(row, version = row.active) { return `/api/image?id=${encodeURIComponent(row.id)}&v=${encodeURIComponent(version)}`; }
+function updateCustomColor(f) {
+  const color=String(f.backgroundColor||'').toUpperCase();
+  $('#custom-color').hidden=f.backgroundTone!=='custom';
+  $('#custom-tone-swatch').style.background=color;
+  $('#background-color-name').textContent=`${colorName(color)} · ${color}`;
+  document.querySelectorAll('[data-swatch]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.swatch===color)));
+}
+// Hide fields instead of clearing them, so switching back keeps the person or product settings.
+function applySubject(f) {
+  const products=f.subject==='products',worn=products&&f.presentation==='worn';
+  document.querySelectorAll('.people-only').forEach(el=>el.hidden=products);
+  document.querySelectorAll('.product-only').forEach(el=>el.hidden=!products);
+  document.querySelectorAll('.model-field').forEach(el=>el.hidden=products&&!worn);
+  $('#angle-field').hidden=f.presentation==='flatlay';
+  ['#age-min','#age-max'].forEach(id=>$(id).required=!products);
+  $('#requirement').placeholder=products?'Enter a product, e.g. Sneakers, Tote bag, Sunglasses…\nOr paste a description of the products you need.':'Enter a name, e.g. Hair Bang, Volume, Wavy…\nOr paste a description of the photos you need.';
+}
+function productSummary(f) {
+  const type=f.productType==='random'?'Random products':productTypes[f.productType]?.label||'',angle=f.presentation==='flatlay'?'':f.angle==='random'?'Random angles':angles[f.angle]?.label||'';
+  let text=`${f.count || '—'} images · ${[f.productType==='request'?'':type,presentations[f.presentation]?.label,angle].filter(Boolean).join(' · ')}`;
+  if(f.presentation==='worn')text+=` · ${names[f.gender]} model${f.regionalBackgrounds.length?' · '+backgroundSummary(f.regionalBackgrounds):''}`;
+  return text+` · ${resolveStudioBackground(f).label} · ${f.aspectRatio==='random'?'Random ratios':f.aspectRatio||'1:1'}`;
+}
 function updateSummary() {
   const f = inputValues(), active = source!=='manual'&&state?.rows.some(r => ['queued','running'].includes(r.status));
   document.querySelector('.background-picker>p').textContent=f.regionalBackgrounds.length>Number(f.count)?`${f.regionalBackgrounds.length} origins selected for ${f.count} images. Some will not appear.`:'Choose people’s ethnic or regional origins, not the photo setting.';
   $('#background-tone').hidden=f.background!=='clean';
-  $('#summary').textContent = `${f.count || '—'} images · ${names[f.gender]} · ${f.ageMin || '0'}–${f.ageMax || '0'} yrs · ${names[f.framing]} · ${resolveStudioBackground(f).label} · ${f.aspectRatio==='random'?'Random ratios':f.aspectRatio||'4:3'}`;
-  if(f.regionalBackgrounds.length)$('#summary').textContent+=' · '+backgroundSummary(f.regionalBackgrounds);
-  if(f.clothingStyle&&f.clothingStyle!=='request')$('#summary').textContent+=' · '+(f.clothingStyle==='random'?'Random style':clothingStyles[f.clothingStyle].label);
-  if(f.season&&f.season!=='any')$('#summary').textContent+=' · '+(f.season==='random'?'Random season':seasons[f.season].label);
+  updateCustomColor(f);
+  applySubject(f);
+  if(f.subject==='products')$('#summary').textContent=productSummary(f);else{
+    $('#summary').textContent = `${f.count || '—'} images · ${names[f.gender]} · ${f.ageMin || '0'}–${f.ageMax || '0'} yrs · ${names[f.framing]} · ${resolveStudioBackground(f).label} · ${f.aspectRatio==='random'?'Random ratios':f.aspectRatio||'1:1'}`;
+    if(f.regionalBackgrounds.length)$('#summary').textContent+=' · '+backgroundSummary(f.regionalBackgrounds);
+    if(f.clothingStyle&&f.clothingStyle!=='request')$('#summary').textContent+=' · '+(f.clothingStyle==='random'?'Random style':clothingStyles[f.clothingStyle].label);
+    if(f.season&&f.season!=='any')$('#summary').textContent+=' · '+(f.season==='random'?'Random season':seasons[f.season].label);
+    if (f.gender === 'mixed' && Number(f.count) % 2 === 1) $('#summary').textContent += ' (one extra female image)';
+  }
   $('#create b').textContent = active ? 'Generating photos…' : source==='personal'&&!state?.keyReady ? 'Connect API to generate photos' : source==='manual'?'Copy image prompt':`Generate ${f.count || '—'} images`;
   $('#create').disabled = submitting || !!active;
   document.querySelectorAll('[data-method]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.method===(source==='manual'?'manual':'personal'))));
   $('#method-settings').hidden=source==='manual';
   $('#source-name').textContent = source==='personal'&&!state?.keyReady ? 'Not connected' : sourceNames[source];
   $('#billing').textContent = source === 'personal'&&!state?.keyReady ? 'An API key is required to generate photos here' : source === 'manual' ? 'No API key needed · Generate and download in ChatGPT or Gemini' : `${source === 'company' ? 'Company' : 'Your API account'} billing · Cost estimate unavailable`;
-  if (f.gender === 'mixed' && Number(f.count) % 2 === 1) $('#summary').textContent += ' (one extra female image)';
 }
 function render() {
   const unavailable=state.storage?.apiGenerationAvailable===false;
@@ -57,7 +85,7 @@ function render() {
   $('#storage-notice').textContent=unavailable?state.storage.message:'';
   const apiMethod=document.querySelector('[data-method="personal"]');
   apiMethod.disabled=unavailable;
-  apiMethod.title=unavailable?'Requires durable storage and a job queue on this deployment.':'';
+  apiMethod.title=unavailable?'Not available on this hosted version yet. Run the app locally to use your own API key.':'';
   const manual=source==='manual';
   $('#api-results').hidden=manual;
   $('#manual-workflow').hidden=!manual;
@@ -82,7 +110,7 @@ function render() {
 }
 async function refresh() { const next = await api('state'); if (JSON.stringify(next) !== JSON.stringify(state)) { state = next; render(); } }
 function connectionSettings() {
-  if(state.storage?.apiGenerationAvailable===false){modal(`<h2>ChatGPT / Gemini</h2><p>${esc(state.storage.message)}</p><div class="buttons"><button data-close>Close</button></div>`);return;}
+  if(state.storage?.apiGenerationAvailable===false){modal(`<h2>Copy prompt to your AI</h2><p>${esc(state.storage.message)}</p><div class="buttons"><button data-close>Close</button></div>`);return;}
   modal(`<h2>Generation method</h2><p>Use ChatGPT or Gemini without an API key: copy the prompt, then generate and download photos in your preferred AI app.</p><form id="connection-form">${[['manual','ChatGPT / Gemini','No API key. Paste the prompt into your chosen AI app.'],['personal','Personal OpenAI API','Billed to your API account'],...(state.companyReady?[['company','Company API',state.account?`Signed in as ${state.account}`:'Sign in to use company billing']]:[])].map(([id,label,desc])=>`<label class="source-option"><input type="radio" name="source" value="${id}" ${source===id?'checked':''}><span>${esc(label)}<br><small>${esc(desc)}</small></span></label>`).join('')}<div id="key-section" ${source==='personal'?'':'hidden'}><h3>OpenAI API Key</h3><p>${state.keyReady?'A key is configured. Leave blank to keep it.':'Not configured. Keys are kept in server memory only.'} ChatGPT subscriptions do not include API credits.</p><input name="key" type="password" autocomplete="off" placeholder="Enter API key" aria-label="OpenAI API Key">${state.keyReady?'<button type="button" id="delete-key">Delete saved key</button>':''}</div><div id="company-section" ${source==='company'&&!state.account?'':'hidden'}><h3>Company account</h3><input name="username" autocomplete="username" placeholder="Company account" aria-label="Company account"><input name="password" type="password" autocomplete="current-password" placeholder="Password" aria-label="Company password"></div><p id="connection-error" class="error" role="alert"></p><div class="buttons"><button type="button" data-close>Cancel</button><button class="primary">Save</button></div></form><p><a href="/advanced.html">Advanced settings</a><small> · Asset list, import / export, and admin settings</small></p>`);
 }
 function paymentDescription(count) { return `<p>${count} images · ${sourceNames[source]}<br>Billed to: ${source==='company'?'Company':'Your API account'}<br>Estimated cost: unavailable. Billed by actual API usage.</p>`; }
@@ -116,7 +144,7 @@ $('#create-form').addEventListener('submit', e => {
   if(source==='company'&&(!state.companyReady||!state.account)){connectionSettings();return;}
   const payload = {...inputValues(),source};
   const ageMin=Number(payload.ageMin),ageMax=Number(payload.ageMax);
-  if(ageMin>ageMax){$('#form-error').textContent='Minimum age cannot exceed maximum age.';return;}
+  if(payload.subject!=='products'&&ageMin>ageMax){$('#form-error').textContent='Minimum age cannot exceed maximum age.';return;}
   if (['personal','company'].includes(source)) {
     modal(`<h2>Generate ${esc(payload.count)} photos?</h2>${paymentDescription(payload.count)}<div class="buttons"><button data-close>Cancel</button><button class="primary" id="confirm-batch">Generate</button></div>`);
     $('#confirm-batch').onclick = () => { $('#modal').close(); startBatch(payload); };
@@ -138,6 +166,7 @@ document.addEventListener('click', async e => {
     if(button.dataset.method){source=button.dataset.method;localStorage.setItem('source',source);render();if(source==='personal'&&!state.keyReady)connectionSettings();}
     if(button.id==='method-settings')connectionSettings();
     if(button.hasAttribute('data-close'))$('#modal').close();
+    if(button.dataset.swatch){$('#background-color').value=button.dataset.swatch.toLowerCase();$('#background-color').dispatchEvent(new Event('input',{bubbles:true}));}
     if(button.dataset.example){$('#requirement').value=button.dataset.example;$('#requirement').dispatchEvent(new Event('input',{bubbles:true}));$('#requirement').focus();}
     if(button.id==='copy-again')copyForChatGPT({...inputValues(),source:'manual'});
     if(button.id==='copy-fallback') {await navigator.clipboard.writeText($('#copy-text').value);toast('Copied. Paste it into ChatGPT or Gemini.');}
@@ -183,6 +212,7 @@ try{
   if(draft){for(const [name,value]of Object.entries(draft)){const elements=$('#create-form').elements.namedItem(name);if(elements&&typeof value!=='object')elements.value=String(value);}}
   try{selectedBackgrounds=new Set(normalizeBackgrounds(draft?.regionalBackgrounds));}catch{selectedBackgrounds.clear();}
   drawBackgroundTree();
-  ['aspect-ratio','clothing-style','season'].forEach(id=>enhanceSelect($('#'+id)));
+  document.querySelector('.color-swatches').innerHTML=backgroundSwatches.map(c=>`<button type="button" data-swatch="${c}" style="background:${c}" aria-label="${colorName(c)}" title="${colorName(c)}"></button>`).join('');
+  ['aspect-ratio','clothing-style','season','product-type','angle'].forEach(id=>enhanceSelect($('#'+id)));
   render();setInterval(async()=>{try{if(!$('#modal').open&&!submitting)await refresh();}catch{}},1500);
 }catch(e){$('#form-error').textContent='Cannot connect. Please check that the server is running.';}

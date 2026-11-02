@@ -6,7 +6,7 @@ export const aspectRatios={
   '9:16':{label:'9:16 · Vertical',width:864,height:1536}
 };
 export function resolveRatio(input,index=0){
-  const choice=input.aspectRatio||'4:3';
+  const choice=input.aspectRatio||'1:1';
   if(choice!=='random'&&!Object.hasOwn(aspectRatios,choice))throw Error('Choose a valid aspect ratio.');
   let ratio=choice;
   if(choice==='random'){

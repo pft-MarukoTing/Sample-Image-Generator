@@ -16,7 +16,7 @@ test('provider contract: one image, server-only credentials, sanitized errors',a
 test('reference adapter uses multipart image edits',async()=>{const result=await providers.personal.generate({row,settings:{reference:'data:image/png;base64,aGVsbG8='},key:'test',fetcher:async(url,options)=>{assert.equal(url,'https://api.openai.com/v1/images/edits');assert.ok(options.body instanceof FormData);assert.equal(options.body.get('n'),'1');assert.equal(await options.body.get('image').text(),'hello');assert.equal(options.headers['Content-Type'],undefined);return {ok:true,json:async()=>({data:[{b64_json:'aGVsbG8='}]})}}});assert.equal(result.ext,'png')});
 test('simple form planner accepts one name and enforces every filter',()=>{
 const input={requirement:'Hair Bang',count:5,ageMin:21,ageMax:25,gender:'mixed',background:'clean',framing:'full'};
-const batch=planBatch(input,'TEST');assert.equal(batch.rows.length,5);assert.equal(batch.rows.filter(r=>r.scene.startsWith('女性')).length,3);assert.equal(batch.rows.filter(r=>r.scene.startsWith('男性')).length,2);assert.ok(batch.rows.every(r=>r.prompt.includes('全身人像')&&r.prompt.includes('without clutter')&&r.prompt.includes('瀏海')));assert.ok(batch.rows.every(r=>r.width===1024&&r.height===768));assert.match(planBatch({...input,requirement:'一個名字',gender:'male',background:'scene',framing:'face'},'TEST').rows[0].prompt,/一個名字/);assert.throws(()=>planBatch({...input,ageMin:30,ageMax:20},'TEST'),/年齡/);assert.throws(()=>planBatch({...input,count:0},'TEST'),/張數/);
+const batch=planBatch(input,'TEST');assert.equal(batch.rows.length,5);assert.equal(batch.rows.filter(r=>r.scene.startsWith('女性')).length,3);assert.equal(batch.rows.filter(r=>r.scene.startsWith('男性')).length,2);assert.ok(batch.rows.every(r=>r.prompt.includes('全身人像')&&r.prompt.includes('without clutter')&&r.prompt.includes('瀏海')));assert.ok(batch.rows.every(r=>r.width===1024&&r.height===1024));assert.match(planBatch({...input,requirement:'一個名字',gender:'male',background:'scene',framing:'face'},'TEST').rows[0].prompt,/一個名字/);assert.throws(()=>planBatch({...input,ageMin:30,ageMax:20},'TEST'),/年齡/);assert.throws(()=>planBatch({...input,count:0},'TEST'),/張數/);
 });
 test('wardrobe respects style, season and random variety in both generation paths',()=>{
 const input={requirement:'閉眼睛',count:6,ageMin:26,ageMax:35,background:'clean',gender:'mixed',framing:'half',clothingStyle:'formal',season:'summer'};
@@ -26,7 +26,22 @@ batch=planBatch({...input,clothingStyle:'random',season:'random'},'WARDROBE');as
 test('aspect ratios are consistent across API rows and copied prompts',()=>{
 const input={requirement:'Hair Bang',count:10,ageMin:18,ageMax:35,gender:'mixed',framing:'half',background:'clean',aspectRatio:'random'};
 const batch=planBatch(input,'RATIO'),prompt=buildChatGPTPrompt(input);assert.equal(new Set(batch.rows.map(r=>r.aspectRatio)).size,5);batch.rows.forEach((r,i)=>{const ratio=resolveRatio(input,i);assert.equal(r.width,ratio.width);assert.equal(r.height,ratio.height);assert.ok(r.prompt.includes('Aspect ratio: '+ratio.ratio));assert.ok(prompt.includes(`${String(i+1).padStart(3,'0')}: ${i%2?'Male':'Female'}, age ${18+i}. Aspect ratio: ${ratio.ratio}.`));});
-for(const [ratio,size]of Object.entries(aspectRatios)){const r=planBatch({...input,aspectRatio:ratio},'FIXED').rows[0];assert.equal(r.width,size.width);assert.equal(r.height,size.height);}assert.equal(planBatch({...input,aspectRatio:undefined},'OLD').rows[0].height,768);assert.throws(()=>planBatch({...input,aspectRatio:'invalid'},'BAD'),/valid aspect ratio/);
+for(const [ratio,size]of Object.entries(aspectRatios)){const r=planBatch({...input,aspectRatio:ratio},'FIXED').rows[0];assert.equal(r.width,size.width);assert.equal(r.height,size.height);}assert.equal(planBatch({...input,aspectRatio:undefined},'OLD').rows[0].height,1024);assert.throws(()=>planBatch({...input,aspectRatio:'invalid'},'BAD'),/valid aspect ratio/);
+});
+test('products subject builds product prompts without person filters in both generation paths',()=>{
+const input={subject:'products',requirement:'Leather sneakers',count:4,background:'clean',productType:'shoes',presentation:'packshot',angle:'random',aspectRatio:'1:1'};
+const batch=planBatch(input,'PROD');assert.equal(batch.config.subject,'products');assert.equal(batch.rows.length,4);assert.ok(batch.rows.every(r=>r.prompt.includes('a pair of shoes')&&r.prompt.includes('No people')&&!r.prompt.includes('人物')&&r.width===1024&&r.height===1024));assert.deepEqual(batch.rows.map(r=>r.angle),['threequarter','front','side','top']);
+const prompt=buildChatGPTPrompt(input);assert.match(prompt,/product photographs/);assert.match(prompt,/Leather sneakers/);assert.doesNotMatch(prompt,/Age range/);
+const flat=planBatch({...input,presentation:'flatlay',angle:'side'},'FLAT');assert.ok(flat.rows.every(r=>r.angle==='top'&&r.prompt.includes('Flat lay')));
+const worn=planBatch({...input,productType:'bags',presentation:'worn',gender:'mixed',regionalBackgrounds:['japan']},'WORN');assert.match(worn.rows[0].prompt,/女性/);assert.match(worn.rows[1].prompt,/男性/);assert.ok(worn.rows.every(r=>r.prompt.includes('carried by hand or on the shoulder')&&r.regionalBackground==='japan'));assert.match(buildChatGPTPrompt({...input,presentation:'worn',gender:'female'}),/Model: Female adult/);
+assert.equal(new Set(planBatch({...input,productType:'random',count:6},'MIX').rows.map(r=>r.productType)).size,6);
+assert.throws(()=>planBatch({...input,productType:'invalid'},'BAD'),/valid product type/);assert.throws(()=>planBatch({...input,presentation:'worn'},'BAD'),/model gender/);assert.throws(()=>planBatch({...input,subject:'pets'},'BAD'),/people or products/);
+});
+test('custom background color reaches both generation paths with a color name',()=>{
+const input={requirement:'Sneakers',count:2,background:'clean',backgroundTone:'custom',backgroundColor:'#f4c7c3',subject:'products',presentation:'packshot'};
+const plan=planBatch(input,'COLOR');assert.equal(plan.config.backgroundColor,'#F4C7C3');assert.ok(plan.rows.every(r=>r.prompt.includes('soft blush pink (hex #F4C7C3)')));assert.match(buildChatGPTPrompt(input),/soft blush pink \(hex #F4C7C3\)/);
+assert.match(planBatch({...input,subject:'people',ageMin:20,ageMax:30,gender:'mixed',framing:'half',backgroundColor:'#2c3d50'},'NAVY').rows[0].prompt,/deep navy/);
+assert.throws(()=>planBatch({...input,backgroundColor:'red'},'BAD'),/valid background color/);assert.equal(planBatch({...input,backgroundTone:'light'},'LIGHT').config.backgroundColor,undefined);
 });
 test('regional background hierarchy supports parent selection without duplicates',()=>{
 assert.deepEqual(normalizeBackgrounds(['east-asia','japan']),['japan','korea','taiwan','china']);assert.equal(backgroundSummary(['asia']),'Asian');assert.equal(backgroundLeaves('asia').length,13);assert.equal(backgroundSummary([]),'Any ethnicity');assert.throws(()=>normalizeBackgrounds(['invalid']),/valid regional/);assert.equal(resolveBackground({regionalBackgrounds:['asia']},1).id,'vietnam');assert.equal(resolveBackground({regionalBackgrounds:['asia']},2).id,'india');
@@ -82,5 +97,5 @@ test('light/dark studio tones agree across copied prompts and API plans; scenery
   for(const tone of ['light','dark']){const f={...input,backgroundTone:tone};const plan=planBatch(f,'TONE');assert.equal(plan.config.backgroundTone,tone);assert.match(plan.rows[0].prompt,new RegExp('plain '+tone+' studio'));assert.match(buildChatGPTPrompt(f),new RegExp('plain '+tone+' studio'));}
   assert.match(buildChatGPTPrompt(input),/plain light studio/);
   const scene={...input,background:'scene',backgroundTone:'dark'};assert.doesNotMatch(buildChatGPTPrompt(scene),/dark studio/);assert.match(buildChatGPTPrompt(scene),/natural indoor or outdoor/);
-  assert.throws(()=>planBatch({...input,backgroundTone:'invalid'},'BAD'),/light or dark/);
+  assert.throws(()=>planBatch({...input,backgroundTone:'invalid'},'BAD'),/light, dark, or custom/);
 });
