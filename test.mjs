@@ -43,6 +43,14 @@ const plan=planBatch(input,'COLOR');assert.equal(plan.config.backgroundColor,'#F
 assert.match(planBatch({...input,subject:'people',ageMin:20,ageMax:30,gender:'mixed',framing:'half',backgroundColor:'#2c3d50'},'NAVY').rows[0].prompt,/deep navy/);
 assert.throws(()=>planBatch({...input,backgroundColor:'red'},'BAD'),/valid background color/);assert.equal(planBatch({...input,backgroundTone:'light'},'LIGHT').config.backgroundColor,undefined);
 });
+test('people per photo lists every person in both generation paths',()=>{
+const input={requirement:'Wavy',count:3,ageMin:20,ageMax:30,gender:'mixed',background:'clean',framing:'half',peopleCount:'2',regionalBackgrounds:['japan','korea']};
+const batch=planBatch(input,'GROUP');assert.equal(batch.config.peopleCount,2);assert.ok(batch.rows.every(r=>r.prompt.includes('2 人合照')&&r.prompt.includes('人物 1：')&&r.prompt.includes('人物 2：')&&r.prompt.includes('剛好 2 個人')&&!r.prompt.includes('只有一個人')));
+assert.match(batch.rows[0].scene,/^女性\/男性 · 20\/21 歲/);assert.match(batch.rows[1].scene,/^男性\/女性 · 22\/23 歲/);assert.deepEqual(batch.rows[0].regionalBackgrounds,['japan','korea']);
+const prompt=buildChatGPTPrompt(input);assert.match(prompt,/exactly 2 people/);assert.match(prompt,/001: 2 people\. Person 1: Female, age 20\..*Person 2: Male, age 21\./);assert.match(prompt,/half-body group shot of 2 people/);
+assert.equal(planBatch({...input,peopleCount:undefined},'ONE').config.peopleCount,1);assert.match(planBatch({...input,peopleCount:'1'},'ONE').rows[0].prompt,/只有一個人/);
+assert.throws(()=>planBatch({...input,peopleCount:'5'},'BAD'),/1 to 4 people/);assert.throws(()=>buildChatGPTPrompt({...input,peopleCount:'0'}),/1 to 4 people/);
+});
 test('regional background hierarchy supports parent selection without duplicates',()=>{
 assert.deepEqual(normalizeBackgrounds(['east-asia','japan']),['japan','korea','taiwan','china']);assert.equal(backgroundSummary(['asia']),'Asian');assert.equal(backgroundLeaves('asia').length,13);assert.equal(backgroundSummary([]),'Any ethnicity');assert.throws(()=>normalizeBackgrounds(['invalid']),/valid regional/);assert.equal(resolveBackground({regionalBackgrounds:['asia']},1).id,'vietnam');assert.equal(resolveBackground({regionalBackgrounds:['asia']},2).id,'india');
 const input={requirement:'閉眼睛',count:4,ageMin:26,ageMax:35,background:'clean',gender:'mixed',framing:'half',regionalBackgrounds:['japan','korea','taiwan']};const batch=planBatch(input,'BG');assert.deepEqual(batch.rows.map(r=>r.regionalBackground),['japan','korea','taiwan','japan']);assert.deepEqual(batch.config.regionalBackgrounds,input.regionalBackgrounds);assert.match(buildChatGPTPrompt(input),/Japanese background/);assert.match(buildChatGPTPrompt(input),/Korean background/);assert.match(buildChatGPTPrompt(input),/Taiwanese background/);assert.ok(batch.rows.every(r=>r.prompt.includes('do not assume one fixed appearance')));assert.equal(resolveBackground({}).id,null);

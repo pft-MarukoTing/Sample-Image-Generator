@@ -39,7 +39,6 @@ function imageURL(row, version = row.active) { return `/api/image?id=${encodeURI
 function updateCustomColor(f) {
   const color=String(f.backgroundColor||'').toUpperCase();
   $('#custom-color').hidden=f.backgroundTone!=='custom';
-  $('#custom-tone-swatch').style.background=color;
   $('#background-color-name').textContent=`${colorName(color)} · ${color}`;
   document.querySelectorAll('[data-swatch]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.swatch===color)));
 }
@@ -70,7 +69,8 @@ function updateSummary() {
     if(f.regionalBackgrounds.length)$('#summary').textContent+=' · '+backgroundSummary(f.regionalBackgrounds);
     if(f.clothingStyle&&f.clothingStyle!=='request')$('#summary').textContent+=' · '+(f.clothingStyle==='random'?'Random style':clothingStyles[f.clothingStyle].label);
     if(f.season&&f.season!=='any')$('#summary').textContent+=' · '+(f.season==='random'?'Random season':seasons[f.season].label);
-    if (f.gender === 'mixed' && Number(f.count) % 2 === 1) $('#summary').textContent += ' (one extra female image)';
+    if(Number(f.peopleCount)>1)$('#summary').textContent=$('#summary').textContent.replace(' images · ',` images · ${f.peopleCount} people each · `);
+    else if (f.gender === 'mixed' && Number(f.count) % 2 === 1) $('#summary').textContent += ' (one extra female image)';
   }
   $('#create b').textContent = active ? 'Generating photos…' : source==='personal'&&!state?.keyReady ? 'Connect API to generate photos' : source==='manual'?'Copy image prompt':`Generate ${f.count || '—'} images`;
   $('#create').disabled = submitting || !!active;

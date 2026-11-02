@@ -3,6 +3,7 @@ import {normalizeBackgrounds,resolveBackground} from './public/backgrounds.js';
 import {resolveRatio} from './public/ratios.js';
 import {resolveWardrobe} from './public/wardrobe.js';
 import {resolveProduct} from './public/products.js';
+import {resolvePeopleCount,resolvePeople} from './public/group.js';
 // Deterministic prompt expansion: no planning model, API call, or extra fee.
 export function planBatch(input, prefix) {
   const requirement = typeof input.requirement === 'string' ? input.requirement.trim() : '';
@@ -15,19 +16,21 @@ export function planBatch(input, prefix) {
   if (!['clean', 'scene'].includes(input.background) || !['female', 'male', 'mixed'].includes(input.gender) || !['face', 'half', 'full'].includes(input.framing)) throw Error('請選擇背景、性別與取景。');
   resolveWardrobe(input);
   resolveRatio(input);
+  const peopleCount=resolvePeopleCount(input), group=peopleCount>1;
   const regionalBackgrounds=normalizeBackgrounds(input.regionalBackgrounds);
   const terms = { 'hair bang': '頭髮具有清楚可見的瀏海', 'volume': '頭髮具有明顯自然蓬鬆感', 'wavy': '頭髮具有清楚可見的波浪捲度' };
-  const frame = {face:'臉部特寫，完整保留頭髮與頭部輪廓', half:'半身人像，從頭頂拍到腰部', full:'全身人像，從頭頂到腳底完整入鏡，不裁切四肢'}[input.framing];
+  const frame = group ? {face:`${peopleCount} 人近距離合照，每個人的臉部與頭髮輪廓都完整入鏡`, half:`${peopleCount} 人半身合照，每個人都從頭頂拍到腰部`, full:`${peopleCount} 人全身合照，每個人都從頭頂到腳底完整入鏡，不裁切四肢`}[input.framing] : {face:'臉部特寫，完整保留頭髮與頭部輪廓', half:'半身人像，從頭頂拍到腰部', full:'全身人像，從頭頂到腳底完整入鏡，不裁切四肢'}[input.framing];
   const studioBackground=resolveStudioBackground(input);
   const background=studioBackground.instruction;
-  const config = { subject:'people', requirement, count, ageMin, ageMax, background:input.background,backgroundTone:studioBackground.tone||'light',...(studioBackground.color?{backgroundColor:studioBackground.color}:{}), gender:input.gender, framing:input.framing,clothingStyle:input.clothingStyle||'request',season:input.season||'any',aspectRatio:input.aspectRatio||'1:1',regionalBackgrounds };
+  const zh = gender => gender === 'female' ? '女性' : '男性';
+  const config = { subject:'people', requirement, count, peopleCount, ageMin, ageMax, background:input.background,backgroundTone:studioBackground.tone||'light',...(studioBackground.color?{backgroundColor:studioBackground.color}:{}), gender:input.gender, framing:input.framing,clothingStyle:input.clothingStyle||'request',season:input.season||'any',aspectRatio:input.aspectRatio||'1:1',regionalBackgrounds };
   const rows = Array.from({length:count}, (_, i) => {
-    const gender = input.gender === 'mixed' ? (i % 2 === 0 ? '女性' : '男性') : input.gender === 'female' ? '女性' : '男性';
-    const age = ageMin + i % (ageMax - ageMin + 1);
+    const people = resolvePeople(input, i), [first] = people;
     const wardrobe=resolveWardrobe(input,i);
     const ratio=resolveRatio(input,i);
-    const personBackground=resolveBackground(input,i);
-    return {id:`${prefix}-${String(i+1).padStart(3,'0')}`,category:requirement.slice(0,60),scene:`${gender} · ${age} 歲 · ${frame.split('，')[0]} · ${studioBackground.label}${wardrobe.label?' · '+wardrobe.label:''} · ${ratio.ratio}${personBackground.id?' · '+personBackground.label:''}`,regionalBackground:personBackground.id,clothingStyle:wardrobe.clothingStyle,season:wardrobe.season,purpose:'素材生成',prompt:[`請根據以下主題或需求生成一張寫實單人照片：\n${requirement}`, terms[requirement.toLowerCase()] || '', `人物：${gender}，年齡 ${age} 歲（限定 ${ageMin}–${ageMax} 歲）。`, `取景：${frame}。`, `背景：${background}。`, `Ethnicity / regional origin: ${personBackground.instruction}`, `Clothing: ${wardrobe.instruction}`, `Aspect ratio: ${ratio.ratio}. Output size: ${ratio.width} × ${ratio.height} pixels.`, `這是第 ${i+1} / ${count} 張，人物外觀、髮色與姿態可自然變化，保持上述條件。`, '每張獨立輸出。不要文字、標誌、浮水印或拼貼；只有一個人。'].filter(Boolean).join('\n'),aspectRatio:ratio.ratio,width:ratio.width,height:ratio.height,status:'draft',versions:[],keep:true};
+    const origins = [...new Set(people.filter(p => p.background.id).map(p => p.background.label))];
+    const who = group ? people.map((p, j) => `人物 ${j+1}：${zh(p.gender)}，年齡 ${p.age} 歲。Ethnicity / regional origin: ${p.background.instruction}`).join('\n') + `\n年齡限定 ${ageMin}–${ageMax} 歲。` : `人物：${zh(first.gender)}，年齡 ${first.age} 歲（限定 ${ageMin}–${ageMax} 歲）。`;
+    return {id:`${prefix}-${String(i+1).padStart(3,'0')}`,category:requirement.slice(0,60),scene:`${people.map(p => zh(p.gender)).join('/')} · ${people.map(p => p.age).join('/')} 歲 · ${frame.split('，')[0]} · ${studioBackground.label}${wardrobe.label?' · '+wardrobe.label:''} · ${ratio.ratio}${origins.length?' · '+origins.join('/'):''}`,regionalBackground:first.background.id,...(group?{peopleCount,regionalBackgrounds:people.map(p => p.background.id)}:{}),clothingStyle:wardrobe.clothingStyle,season:wardrobe.season,purpose:'素材生成',prompt:[`請根據以下主題或需求生成一張寫實${group ? ` ${peopleCount} 人合照` : '單人照片'}：\n${requirement}`, terms[requirement.toLowerCase()] || '', who, `取景：${frame}。`, `背景：${background}。`, group ? '' : `Ethnicity / regional origin: ${first.background.instruction}`, `Clothing: ${wardrobe.instruction}${group ? ' Keep one consistent style across the group, with different garments for each person.' : ''}`, `Aspect ratio: ${ratio.ratio}. Output size: ${ratio.width} × ${ratio.height} pixels.`, `這是第 ${i+1} / ${count} 張，人物外觀、髮色與姿態可自然變化，保持上述條件。`, group ? `每張獨立輸出。不要文字、標誌、浮水印或拼貼；畫面剛好 ${peopleCount} 個人，每張臉都清楚不被遮擋，不要出現路人。` : '每張獨立輸出。不要文字、標誌、浮水印或拼貼；只有一個人。'].filter(Boolean).join('\n'),aspectRatio:ratio.ratio,width:ratio.width,height:ratio.height,status:'draft',versions:[],keep:true};
   });
   return {config, rows};
 }
