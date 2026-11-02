@@ -5,11 +5,12 @@ import {clothingStyles,seasons} from './wardrobe.js';
 import {productTypes,presentations,angles} from './products.js';
 import {displayScene,uiError} from './english.js';
 import {buildChatGPTPrompt} from './chatgpt-prompt.js';
+import {aiAppLinks} from './ai-apps.js';
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let selectedBackgrounds=new Set();
 let state, source = localStorage.getItem('source') || 'manual', submitting = false, showHistory = false;
-const sourceNames = {personal:'OpenAI Images', company:'Company API', manual:'ChatGPT / Gemini'};
+const sourceNames = {personal:'OpenAI Images', company:'Company API', manual:'Copy prompt'};
 const names = {clean:'Clean background',scene:'In a setting',female:'Female',male:'Male',mixed:'50/50 split',face:'Face',half:'Half body',full:'Full body'};
 async function api(route, body) {
   const response = await fetch('/api/' + route, body ? {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)} : {});
@@ -76,7 +77,7 @@ function updateSummary() {
   document.querySelectorAll('[data-method]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.method===(source==='manual'?'manual':'personal'))));
   $('#method-settings').hidden=source==='manual';
   $('#source-name').textContent = source==='personal'&&!state?.keyReady ? 'Not connected' : sourceNames[source];
-  $('#billing').textContent = source === 'personal'&&!state?.keyReady ? 'An API key is required to generate photos here' : source === 'manual' ? 'No API key needed · Generate and download in ChatGPT or Gemini' : `${source === 'company' ? 'Company' : 'Your API account'} billing · Cost estimate unavailable`;
+  $('#billing').textContent = source === 'personal'&&!state?.keyReady ? 'An API key is required to generate photos here' : source === 'manual' ? 'No API key needed · Generate and download in your AI app' : `${source === 'company' ? 'Company' : 'Your API account'} billing · Cost estimate unavailable`;
 }
 function render() {
   const unavailable=state.storage?.apiGenerationAvailable===false;
@@ -99,11 +100,11 @@ function render() {
   $('#history').textContent = showHistory ? 'Current batch' : 'History';
   $('#history').hidden = !state.rows.some(r => isRealRow(r) && !state.latestBatch?.ids.includes(r.id)) && !showHistory;
   $('#download-all').hidden = done === 0;
-  $('#result-subtitle').textContent = showHistory ? 'Your previous photos are saved and ready to download.' : rows.length ? `${state.latestBatch.requirement.slice(0,40)} · ${active.length ? 'Generating. Photos will appear as they finish.' : failed.length ? `${failed.length} failed. Retry individual images.` : source === 'manual' && !done ? 'Generate in ChatGPT or Gemini, then upload the photos here.' : 'Click a photo to preview it, then download your favorites.'}` : source==='manual'?'Copy the prompt on the left and paste it into ChatGPT or Gemini.':'Your generated photos will appear here.';
+  $('#result-subtitle').textContent = showHistory ? 'Your previous photos are saved and ready to download.' : rows.length ? `${state.latestBatch.requirement.slice(0,40)} · ${active.length ? 'Generating. Photos will appear as they finish.' : failed.length ? `${failed.length} failed. Retry individual images.` : source === 'manual' && !done ? 'Generate in your AI app, then upload the photos here.' : 'Click a photo to preview it, then download your favorites.'}` : source==='manual'?'Copy the prompt on the left and paste it into your AI app.':'Your generated photos will appear here.';
   $('#chatgpt-actions').hidden=source!=='manual';
   $('#progress').hidden = active.length === 0;
   $('#progress').innerHTML = active.length ? `<div class="progress-panel"><div><span>Completed ${done} / ${rows.length} · ${rows.filter(r=>r.status==='running').length} generating</span><button id="stop">Stop queued tasks</button></div><div class="progress-track"><span style="width:${Math.round(done/rows.length*100)}%"></span></div></div>` : '';
-  $('#images').innerHTML = !rows.length ? `<div class="empty"><div class="empty-art" aria-hidden="true"><div class="paper"></div><div class="paper front">▧</div><span class="spark">✦</span></div><h3>${source==='manual'?'Create photos in ChatGPT or Gemini.':state.keyReady||source==='company'?'Ready to generate your photos.':'Connect an image service to generate photos.'}</h3><p>${source==='manual'?'1. Copy the prompt and paste it into ChatGPT or Gemini.<br>2. Generate and download your photos.<br>3. Return here and upload each photo.':state.keyReady||source==='company'?'Enter a request, choose your options, and generate.':'No API key is configured. Connect one to generate photos here.'}</p>${source==='manual'?'<a class="download connect-empty" href="https://chatgpt.com/" target="_blank" rel="noopener noreferrer">Open ChatGPT ↗</a><a class="download connect-empty" href="https://gemini.google.com/" target="_blank" rel="noopener noreferrer">Open Gemini ↗</a>':state.keyReady||source==='company'?'':'<button class="download connect-empty" id="connect-empty">Connect OpenAI API →</button>'}<span class="mini">${source==='manual'?'Uses the image features and limits of your account. You open your AI app and paste the prompt yourself.':state.keyReady||source==='company'?'Each image is generated separately and saved automatically.':'Previous demo images are excluded from photo results.'}</span></div>` : `<div class="grid">${rows.map((row,i) => {
+  $('#images').innerHTML = !rows.length ? `<div class="empty"><div class="empty-art" aria-hidden="true"><div class="paper"></div><div class="paper front">▧</div><span class="spark">✦</span></div><h3>${source==='manual'?'Create photos in your AI app.':state.keyReady||source==='company'?'Ready to generate your photos.':'Connect an image service to generate photos.'}</h3><p>${source==='manual'?'1. Copy the prompt and paste it into your AI app.<br>2. Generate and download your photos.<br>3. Return here and upload each photo.':state.keyReady||source==='company'?'Enter a request, choose your options, and generate.':'No API key is configured. Connect one to generate photos here.'}</p>${source==='manual'?`<div class="ai-app-links empty-links">${aiAppLinks()}</div>`:state.keyReady||source==='company'?'':'<button class="download connect-empty" id="connect-empty">Connect OpenAI API →</button>'}<span class="mini">${source==='manual'?'Uses the image features and limits of your account. You open your AI app and paste the prompt yourself.':state.keyReady||source==='company'?'Each image is generated separately and saved automatically.':'Previous demo images are excluded from photo results.'}</span></div>` : `<div class="grid">${rows.map((row,i) => {
     const version = row.versions.find(v => v.id === row.active), waiting = ['running','queued'].includes(row.status);
     return `<article class="image-card">${version ? `<img style="aspect-ratio:${row.width}/${row.height}" src="${imageURL(row)}" alt="${esc(displayScene(row.scene))}" data-preview="${esc(row.id)}">` : `<div style="aspect-ratio:${row.width}/${row.height}" class="skeleton ${row.status==='failed'?'failed':''}">${row.status==='failed'?'Failed':row.status==='running'?'✦ Generating…':row.status==='queued'?'Queued': 'Upload your photo'}</div>`}<div class="image-body"><h3>${String(i+1).padStart(2,'0')} · ${esc(displayScene(row.scene))}</h3>${version ? `<p>${version.source==='mock'?'◈ Demo only, not AI-generated':version.source==='manual'?'Uploaded':'AI-generated'}${row.versions.length>1?' · '+row.versions.length+' versions saved':''}</p>` : ''}${row.error ? `<p class="failure">${esc(uiError(row.error))}</p>` : ''}${row.versions.length>1?`<select data-version="${esc(row.id)}" aria-label="${esc(row.id)} image version">${row.versions.map((v,j)=>`<option value="${v.id}" ${v.id===row.active?'selected':''}>Version ${j+1}${v.source==='mock'?' · Demo':''}</option>`).join('')}</select>`:''}<div class="image-buttons">${version?`<a href="${imageURL(row)}&download=1">↓ Download</a>`:''}${row.source==='manual'?`<button data-copy="${esc(row.id)}">Copy prompt</button><button data-upload="${esc(row.id)}">Upload photo</button>`:`<button data-regenerate="${esc(row.id)}" ${waiting?'disabled':''}>${row.status==='failed'?'Retry':'Regenerate'}</button>`}</div></div></article>`;
   }).join('')}</div>`;
@@ -111,7 +112,7 @@ function render() {
 async function refresh() { const next = await api('state'); if (JSON.stringify(next) !== JSON.stringify(state)) { state = next; render(); } }
 function connectionSettings() {
   if(state.storage?.apiGenerationAvailable===false){modal(`<h2>Copy prompt to your AI</h2><p>${esc(state.storage.message)}</p><div class="buttons"><button data-close>Close</button></div>`);return;}
-  modal(`<h2>Generation method</h2><p>Use ChatGPT or Gemini without an API key: copy the prompt, then generate and download photos in your preferred AI app.</p><form id="connection-form">${[['manual','ChatGPT / Gemini','No API key. Paste the prompt into your chosen AI app.'],['personal','Personal OpenAI API','Billed to your API account'],...(state.companyReady?[['company','Company API',state.account?`Signed in as ${state.account}`:'Sign in to use company billing']]:[])].map(([id,label,desc])=>`<label class="source-option"><input type="radio" name="source" value="${id}" ${source===id?'checked':''}><span>${esc(label)}<br><small>${esc(desc)}</small></span></label>`).join('')}<div id="key-section" ${source==='personal'?'':'hidden'}><h3>OpenAI API Key</h3><p>${state.keyReady?'A key is configured. Leave blank to keep it.':'Not configured. Keys are kept in server memory only.'} ChatGPT subscriptions do not include API credits.</p><input name="key" type="password" autocomplete="off" placeholder="Enter API key" aria-label="OpenAI API Key">${state.keyReady?'<button type="button" id="delete-key">Delete saved key</button>':''}</div><div id="company-section" ${source==='company'&&!state.account?'':'hidden'}><h3>Company account</h3><input name="username" autocomplete="username" placeholder="Company account" aria-label="Company account"><input name="password" type="password" autocomplete="current-password" placeholder="Password" aria-label="Company password"></div><p id="connection-error" class="error" role="alert"></p><div class="buttons"><button type="button" data-close>Cancel</button><button class="primary">Save</button></div></form><p><a href="/advanced.html">Advanced settings</a><small> · Asset list, import / export, and admin settings</small></p>`);
+  modal(`<h2>Generation method</h2><p>Use any AI app without an API key: copy the prompt, then generate and download photos in your preferred AI app.</p><form id="connection-form">${[['manual','Copy prompt','No API key. Paste the prompt into your chosen AI app.'],['personal','Personal OpenAI API','Billed to your API account'],...(state.companyReady?[['company','Company API',state.account?`Signed in as ${state.account}`:'Sign in to use company billing']]:[])].map(([id,label,desc])=>`<label class="source-option"><input type="radio" name="source" value="${id}" ${source===id?'checked':''}><span>${esc(label)}<br><small>${esc(desc)}</small></span></label>`).join('')}<div id="key-section" ${source==='personal'?'':'hidden'}><h3>OpenAI API Key</h3><p>${state.keyReady?'A key is configured. Leave blank to keep it.':'Not configured. Keys are kept in server memory only.'} ChatGPT subscriptions do not include API credits.</p><input name="key" type="password" autocomplete="off" placeholder="Enter API key" aria-label="OpenAI API Key">${state.keyReady?'<button type="button" id="delete-key">Delete saved key</button>':''}</div><div id="company-section" ${source==='company'&&!state.account?'':'hidden'}><h3>Company account</h3><input name="username" autocomplete="username" placeholder="Company account" aria-label="Company account"><input name="password" type="password" autocomplete="current-password" placeholder="Password" aria-label="Company password"></div><p id="connection-error" class="error" role="alert"></p><div class="buttons"><button type="button" data-close>Cancel</button><button class="primary">Save</button></div></form><p><a href="/advanced.html">Advanced settings</a><small> · Asset list, import / export, and admin settings</small></p>`);
 }
 function paymentDescription(count) { return `<p>${count} images · ${sourceNames[source]}<br>Billed to: ${source==='company'?'Company':'Your API account'}<br>Estimated cost: unavailable. Billed by actual API usage.</p>`; }
 async function startBatch(payload) {
@@ -127,7 +128,7 @@ async function startBatch(payload) {
     await api('batch',{...payload,requestId:pending.requestId});
     sessionStorage.removeItem('pending-batch');
     state = await api('state'); showHistory = false; render();
-    toast(source==='manual'?'Upload slots are ready. Paste the prompt into ChatGPT or Gemini to generate your photos.':'Photo generation started.');
+    toast(source==='manual'?'Upload slots are ready. Paste the prompt into your AI app to generate your photos.':'Photo generation started.');
   } catch (error) { $('#form-error').textContent = uiError(error.message); }
   finally { submitting = false; updateSummary(); }
 }
@@ -135,7 +136,7 @@ async function copyForChatGPT(payload) {
   let text;try{text=buildChatGPTPrompt(payload);}catch(e){$('#form-error').textContent=uiError(e.message);return;}
   let copied=false;
   try{await navigator.clipboard.writeText(text);copied=true;}catch{}
-  if(copied)toast('Prompt copied! Paste it into ChatGPT or Gemini.');
+  if(copied)toast('Prompt copied! Paste it into your AI app.');
   else modal(`<h2>Image generation prompt</h2><p>If clipboard access is blocked, select the text below and copy it manually.</p><textarea id="copy-text" readonly>${esc(text)}</textarea><div class="buttons"><button data-close>Close</button><button class="primary" id="copy-fallback">Copy prompt</button></div>`);
 }
 $('#create-form').addEventListener('submit', e => {
@@ -169,7 +170,7 @@ document.addEventListener('click', async e => {
     if(button.dataset.swatch){$('#background-color').value=button.dataset.swatch.toLowerCase();$('#background-color').dispatchEvent(new Event('input',{bubbles:true}));}
     if(button.dataset.example){$('#requirement').value=button.dataset.example;$('#requirement').dispatchEvent(new Event('input',{bubbles:true}));$('#requirement').focus();}
     if(button.id==='copy-again')copyForChatGPT({...inputValues(),source:'manual'});
-    if(button.id==='copy-fallback') {await navigator.clipboard.writeText($('#copy-text').value);toast('Copied. Paste it into ChatGPT or Gemini.');}
+    if(button.id==='copy-fallback') {await navigator.clipboard.writeText($('#copy-text').value);toast('Copied. Paste it into your AI app.');}
     if(button.id==='connect-empty')connectionSettings();
     if(button.id==='stop'){await api('stop',{});await refresh();toast('Queued tasks stopped. Images already generating will finish.');}
     if(button.id==='delete-key'){await api('key',{});state=await api('state');source='personal';localStorage.setItem('source',source);render();connectionSettings();toast('API key deleted. API generation is paused.');}
@@ -212,6 +213,7 @@ try{
   if(draft){for(const [name,value]of Object.entries(draft)){const elements=$('#create-form').elements.namedItem(name);if(elements&&typeof value!=='object')elements.value=String(value);}}
   try{selectedBackgrounds=new Set(normalizeBackgrounds(draft?.regionalBackgrounds));}catch{selectedBackgrounds.clear();}
   drawBackgroundTree();
+  document.querySelectorAll('.ai-app-links').forEach(el=>el.innerHTML=aiAppLinks());
   document.querySelector('.color-swatches').innerHTML=backgroundSwatches.map(c=>`<button type="button" data-swatch="${c}" style="background:${c}" aria-label="${colorName(c)}" title="${colorName(c)}"></button>`).join('');
   ['aspect-ratio','clothing-style','season','product-type','angle'].forEach(id=>enhanceSelect($('#'+id)));
   render();setInterval(async()=>{try{if(!$('#modal').open&&!submitting)await refresh();}catch{}},1500);
