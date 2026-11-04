@@ -10,6 +10,11 @@ const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 let selectedBackgrounds=new Set();
 let state, source = localStorage.getItem('source') || 'manual', submitting = false, showHistory = false;
+// Hosted (stateless) mode: the API key and generated photos live only in this browser tab.
+let direct = null;
+const directKey = {get:()=>{try{return sessionStorage.getItem('direct-key')||'';}catch{return '';}}, set:v=>{try{v?sessionStorage.setItem('direct-key',v):sessionStorage.removeItem('direct-key');}catch{}}};
+function isDirect() { return !!state?.storage?.directApiAvailable; }
+function withDirect(next) { if(!next.storage?.directApiAvailable)return next; direct ??= {rows:[],batch:null}; return {...next,rows:direct.rows,latestBatch:direct.batch,keyReady:!!directKey.get()}; }
 const sourceNames = {personal:'OpenAI Images', company:'Company API', manual:'Copy prompt'};
 const names = {clean:'Clean background',scene:'In a setting',female:'Female',male:'Male',mixed:'50/50 split',face:'Face',half:'Half body',full:'Full body'};
 async function api(route, body) {
@@ -35,7 +40,7 @@ document.addEventListener('click',e=>{if(!e.target.closest('#background-picker')
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#background-menu').hidden){closeBackgroundPicker();$('#background-toggle').focus();}});
 function isRealRow(row) { if(!['personal','company'].includes(row.source))return false; const version=row.versions.find(v=>v.id===row.active); return version ? version.source!=='mock' : ['personal','company','manual'].includes(row.source); }
 function currentRows() { const ids = new Set(state.latestBatch?.ids || []); return state.rows.filter(row => isRealRow(row) && (showHistory ? !ids.has(row.id) : ids.has(row.id))); }
-function imageURL(row, version = row.active) { return `/api/image?id=${encodeURIComponent(row.id)}&v=${encodeURIComponent(version)}`; }
+function imageURL(row, version = row.active) { const v = row.versions.find(x => x.id === version); if (v?.dataUrl) return v.dataUrl; return `/api/image?id=${encodeURIComponent(row.id)}&v=${encodeURIComponent(version)}`; }
 function updateCustomColor(f) {
   const color=String(f.backgroundColor||'').toUpperCase();
   $('#custom-color').hidden=f.backgroundTone!=='custom';
@@ -80,10 +85,10 @@ function updateSummary() {
   $('#billing').textContent = source === 'personal'&&!state?.keyReady ? 'An API key is required to generate photos here' : source === 'manual' ? 'No API key needed · Generate and download in your AI app' : `${source === 'company' ? 'Company' : 'Your API account'} billing · Cost estimate unavailable`;
 }
 function render() {
-  const unavailable=state.storage?.apiGenerationAvailable===false;
+  const unavailable=state.storage?.apiGenerationAvailable===false&&!isDirect(), stateless=state.storage?.persistent===false;
   if(unavailable){source='manual';localStorage.setItem('source','manual');}
-  $('#storage-notice').hidden=!unavailable;
-  $('#storage-notice').textContent=unavailable?state.storage.message:'';
+  $('#storage-notice').hidden=!stateless;
+  $('#storage-notice').textContent=stateless?state.storage.message:'';
   const apiMethod=document.querySelector('[data-method="personal"]');
   apiMethod.disabled=unavailable;
   apiMethod.title=unavailable?'Not available on this hosted version yet. Run the app locally to use your own API key.':'';
@@ -92,7 +97,7 @@ function render() {
   $('#manual-workflow').hidden=!manual;
   document.querySelector('.workspace').classList.toggle('manual-only',manual);
   document.body.classList.toggle('manual-mode',manual);
-  $('#workflow-footer').textContent=manual?'Copy your prompt. Create in your preferred AI app.':'API results and progress are saved automatically.';
+  $('#workflow-footer').textContent=manual?'Copy your prompt. Create in your preferred AI app.':isDirect()?'Photos stay in this tab only. Download the ones you want before leaving.':'API results and progress are saved automatically.';
   updateSummary();
   const rows = currentRows(), done = rows.filter(r => r.active).length;
   const active = rows.filter(r => ['queued','running'].includes(r.status)), failed = rows.filter(r => r.status === 'failed');
@@ -104,20 +109,21 @@ function render() {
   $('#chatgpt-actions').hidden=source!=='manual';
   $('#progress').hidden = active.length === 0;
   $('#progress').innerHTML = active.length ? `<div class="progress-panel"><div><span>Completed ${done} / ${rows.length} · ${rows.filter(r=>r.status==='running').length} generating</span><button id="stop">Stop queued tasks</button></div><div class="progress-track"><span style="width:${Math.round(done/rows.length*100)}%"></span></div></div>` : '';
-  $('#images').innerHTML = !rows.length ? `<div class="empty"><div class="empty-art" aria-hidden="true"><div class="paper"></div><div class="paper front">▧</div><span class="spark">✦</span></div><h3>${source==='manual'?'Create photos in your AI app.':state.keyReady||source==='company'?'Ready to generate your photos.':'Connect an image service to generate photos.'}</h3><p>${source==='manual'?'1. Copy the prompt and paste it into your AI app.<br>2. Generate and download your photos.<br>3. Return here and upload each photo.':state.keyReady||source==='company'?'Enter a request, choose your options, and generate.':'No API key is configured. Connect one to generate photos here.'}</p>${source==='manual'?`<div class="ai-app-links empty-links">${aiAppLinks()}</div>`:state.keyReady||source==='company'?'':'<button class="download connect-empty" id="connect-empty">Connect OpenAI API →</button>'}<span class="mini">${source==='manual'?'Uses the image features and limits of your account. You open your AI app and paste the prompt yourself.':state.keyReady||source==='company'?'Each image is generated separately and saved automatically.':'Previous demo images are excluded from photo results.'}</span></div>` : `<div class="grid">${rows.map((row,i) => {
+  $('#images').innerHTML = !rows.length ? `<div class="empty"><div class="empty-art" aria-hidden="true"><div class="paper"></div><div class="paper front">▧</div><span class="spark">✦</span></div><h3>${source==='manual'?'Create photos in your AI app.':state.keyReady||source==='company'?'Ready to generate your photos.':'Connect an image service to generate photos.'}</h3><p>${source==='manual'?'1. Copy the prompt and paste it into your AI app.<br>2. Generate and download your photos.<br>3. Return here and upload each photo.':state.keyReady||source==='company'?'Enter a request, choose your options, and generate.':'No API key is configured. Connect one to generate photos here.'}</p>${source==='manual'?`<div class="ai-app-links empty-links">${aiAppLinks()}</div>`:state.keyReady||source==='company'?'':'<button class="download connect-empty" id="connect-empty">Connect OpenAI API →</button>'}<span class="mini">${source==='manual'?'Uses the image features and limits of your account. You open your AI app and paste the prompt yourself.':state.keyReady||source==='company'?(isDirect()?'Each image is generated separately. Photos stay in this tab only.':'Each image is generated separately and saved automatically.'):'Previous demo images are excluded from photo results.'}</span></div>` : `<div class="grid">${rows.map((row,i) => {
     const version = row.versions.find(v => v.id === row.active), waiting = ['running','queued'].includes(row.status);
-    return `<article class="image-card">${version ? `<img style="aspect-ratio:${row.width}/${row.height}" src="${imageURL(row)}" alt="${esc(displayScene(row.scene))}" data-preview="${esc(row.id)}">` : `<div style="aspect-ratio:${row.width}/${row.height}" class="skeleton ${row.status==='failed'?'failed':''}">${row.status==='failed'?'Failed':row.status==='running'?'✦ Generating…':row.status==='queued'?'Queued': 'Upload your photo'}</div>`}<div class="image-body"><h3>${String(i+1).padStart(2,'0')} · ${esc(displayScene(row.scene))}</h3>${version ? `<p>${version.source==='mock'?'◈ Demo only, not AI-generated':version.source==='manual'?'Uploaded':'AI-generated'}${row.versions.length>1?' · '+row.versions.length+' versions saved':''}</p>` : ''}${row.error ? `<p class="failure">${esc(uiError(row.error))}</p>` : ''}${row.versions.length>1?`<select data-version="${esc(row.id)}" aria-label="${esc(row.id)} image version">${row.versions.map((v,j)=>`<option value="${v.id}" ${v.id===row.active?'selected':''}>Version ${j+1}${v.source==='mock'?' · Demo':''}</option>`).join('')}</select>`:''}<div class="image-buttons">${version?`<a href="${imageURL(row)}&download=1">↓ Download</a>`:''}${row.source==='manual'?`<button data-copy="${esc(row.id)}">Copy prompt</button><button data-upload="${esc(row.id)}">Upload photo</button>`:`<button data-regenerate="${esc(row.id)}" ${waiting?'disabled':''}>${row.status==='failed'?'Retry':'Regenerate'}</button>`}</div></div></article>`;
+    return `<article class="image-card">${version ? `<img style="aspect-ratio:${row.width}/${row.height}" src="${imageURL(row)}" alt="${esc(displayScene(row.scene))}" data-preview="${esc(row.id)}">` : `<div style="aspect-ratio:${row.width}/${row.height}" class="skeleton ${row.status==='failed'?'failed':''}">${row.status==='failed'?'Failed':row.status==='running'?'✦ Generating…':row.status==='queued'?'Queued': 'Upload your photo'}</div>`}<div class="image-body"><h3>${String(i+1).padStart(2,'0')} · ${esc(displayScene(row.scene))}</h3>${version ? `<p>${version.source==='mock'?'◈ Demo only, not AI-generated':version.source==='manual'?'Uploaded':'AI-generated'}${row.versions.length>1?' · '+row.versions.length+' versions saved':''}</p>` : ''}${row.error ? `<p class="failure">${esc(uiError(row.error))}</p>` : ''}${row.versions.length>1?`<select data-version="${esc(row.id)}" aria-label="${esc(row.id)} image version">${row.versions.map((v,j)=>`<option value="${v.id}" ${v.id===row.active?'selected':''}>Version ${j+1}${v.source==='mock'?' · Demo':''}</option>`).join('')}</select>`:''}<div class="image-buttons">${version?(version.dataUrl?`<a href="${version.dataUrl}" download="${esc(row.id)}.${version.ext}">↓ Download</a>`:`<a href="${imageURL(row)}&download=1">↓ Download</a>`):''}${row.source==='manual'?`<button data-copy="${esc(row.id)}">Copy prompt</button><button data-upload="${esc(row.id)}">Upload photo</button>`:`<button data-regenerate="${esc(row.id)}" ${waiting?'disabled':''}>${row.status==='failed'?'Retry':'Regenerate'}</button>`}</div></div></article>`;
   }).join('')}</div>`;
 }
-async function refresh() { const next = await api('state'); if (JSON.stringify(next) !== JSON.stringify(state)) { state = next; render(); } }
+async function refresh() { const next = withDirect(await api('state')); if (JSON.stringify(next) !== JSON.stringify(state)) { state = next; render(); } }
 function connectionSettings() {
-  if(state.storage?.apiGenerationAvailable===false){modal(`<h2>Copy prompt to your AI</h2><p>${esc(state.storage.message)}</p><div class="buttons"><button data-close>Close</button></div>`);return;}
-  modal(`<h2>Generation method</h2><p>Use any AI app without an API key: copy the prompt, then generate and download photos in your preferred AI app.</p><form id="connection-form">${[['manual','Copy prompt','No API key. Paste the prompt into your chosen AI app.'],['personal','Personal OpenAI API','Billed to your API account'],...(state.companyReady?[['company','Company API',state.account?`Signed in as ${state.account}`:'Sign in to use company billing']]:[])].map(([id,label,desc])=>`<label class="source-option"><input type="radio" name="source" value="${id}" ${source===id?'checked':''}><span>${esc(label)}<br><small>${esc(desc)}</small></span></label>`).join('')}<div id="key-section" ${source==='personal'?'':'hidden'}><h3>OpenAI API Key</h3><p>${state.keyReady?'A key is configured. Leave blank to keep it.':'Not configured. Keys are kept in server memory only.'} ChatGPT subscriptions do not include API credits.</p><input name="key" type="password" autocomplete="off" placeholder="Enter API key" aria-label="OpenAI API Key">${state.keyReady?'<button type="button" id="delete-key">Delete saved key</button>':''}</div><div id="company-section" ${source==='company'&&!state.account?'':'hidden'}><h3>Company account</h3><input name="username" autocomplete="username" placeholder="Company account" aria-label="Company account"><input name="password" type="password" autocomplete="current-password" placeholder="Password" aria-label="Company password"></div><p id="connection-error" class="error" role="alert"></p><div class="buttons"><button type="button" data-close>Cancel</button><button class="primary">Save</button></div></form><p><a href="/advanced.html">Advanced settings</a><small> · Asset list, import / export, and admin settings</small></p>`);
+  if(state.storage?.apiGenerationAvailable===false&&!isDirect()){modal(`<h2>Copy prompt to your AI</h2><p>${esc(state.storage.message)}</p><div class="buttons"><button data-close>Close</button></div>`);return;}
+  modal(`<h2>Generation method</h2><p>Use any AI app without an API key: copy the prompt, then generate and download photos in your preferred AI app.</p><form id="connection-form">${[['manual','Copy prompt','No API key. Paste the prompt into your chosen AI app.'],['personal','Personal OpenAI API','Billed to your API account'],...(state.companyReady?[['company','Company API',state.account?`Signed in as ${state.account}`:'Sign in to use company billing']]:[])].map(([id,label,desc])=>`<label class="source-option"><input type="radio" name="source" value="${id}" ${source===id?'checked':''}><span>${esc(label)}<br><small>${esc(desc)}</small></span></label>`).join('')}<div id="key-section" ${source==='personal'?'':'hidden'}><h3>OpenAI API Key</h3><p>${state.keyReady?'A key is configured. Leave blank to keep it.':'Not configured.'} ${isDirect()?'The key is kept only in this browser tab and sent with each request; the server never stores it.':'Keys are kept in server memory only.'} ChatGPT subscriptions do not include API credits.</p><input name="key" type="password" autocomplete="off" placeholder="Enter API key" aria-label="OpenAI API Key">${state.keyReady?'<button type="button" id="delete-key">Delete saved key</button>':''}</div><div id="company-section" ${source==='company'&&!state.account?'':'hidden'}><h3>Company account</h3><input name="username" autocomplete="username" placeholder="Company account" aria-label="Company account"><input name="password" type="password" autocomplete="current-password" placeholder="Password" aria-label="Company password"></div><p id="connection-error" class="error" role="alert"></p><div class="buttons"><button type="button" data-close>Cancel</button><button class="primary">Save</button></div></form><p><a href="/advanced.html">Advanced settings</a><small> · Asset list, import / export, and admin settings</small></p>`);
 }
 function paymentDescription(count) { return `<p>${count} images · ${sourceNames[source]}<br>Billed to: ${source==='company'?'Company':'Your API account'}<br>Estimated cost: unavailable. Billed by actual API usage.</p>`; }
 async function startBatch(payload) {
   if (submitting) return;
   if(source==='personal'&&!state.keyReady){connectionSettings();return;}
+  if(isDirect())return startDirect(payload);
   submitting = true; $('#form-error').textContent = ''; updateSummary();
   // Keep the same id for a retry after an uncertain network response.
   const serialized = JSON.stringify(payload);
@@ -131,6 +137,33 @@ async function startBatch(payload) {
     toast(source==='manual'?'Upload slots are ready. Paste the prompt into your AI app to generate your photos.':'Photo generation started.');
   } catch (error) { $('#form-error').textContent = uiError(error.message); }
   finally { submitting = false; updateSummary(); }
+}
+async function directRequest(row) {
+  row.status='running'; delete row.error; render();
+  try {
+    const response = await fetch('/api/direct',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key:directKey.get(),input:row.input,index:row.index})});
+    const result = await response.json().catch(()=>({error:'The server returned an unexpected response.'}));
+    if (!response.ok) throw Error(result.error || 'Action could not be completed');
+    const version = {id:'v'+(row.versions.length+1),source:'personal',ext:/^data:image\/(\w+)/.exec(result.image)?.[1]||'png',dataUrl:result.image};
+    Object.assign(row,{scene:result.scene,width:result.width,height:result.height,prompt:result.prompt,status:'success'});
+    row.versions.push(version); row.active=version.id;
+  } catch (error) { row.status='failed'; row.error=error.message; }
+  render();
+}
+// Two requests at a time, matching the local server's worker limit.
+async function pumpDirect() {
+  const worker = async () => { for (let row; (row = direct.rows.find(r => r.status==='queued' && direct.batch?.ids.includes(r.id)));) await directRequest(row); };
+  await Promise.all([worker(),worker()]);
+}
+function startDirect(payload) {
+  const count=Number(payload.count), prefix='IMG-'+Date.now().toString(36).toUpperCase();
+  if(!Number.isInteger(count)||count<1||count>100){$('#form-error').textContent='Enter an image count from 1 to 100.';return;}
+  const [width,height]=payload.aspectRatio&&payload.aspectRatio!=='random'?payload.aspectRatio.split(':').map(Number):[1,1];
+  const rows=Array.from({length:count},(_,i)=>({id:`${prefix}-${String(i+1).padStart(3,'0')}`,index:i,input:payload,category:payload.requirement.slice(0,60),scene:'',width,height,source:'personal',status:'queued',versions:[]}));
+  direct.rows.push(...rows); direct.batch={requirement:payload.requirement,ids:rows.map(r=>r.id)};
+  state=withDirect(state); showHistory=false; render();
+  toast('Photo generation started. Photos stay in this tab only.');
+  pumpDirect();
 }
 async function copyForChatGPT(payload) {
   let text;try{text=buildChatGPTPrompt(payload);}catch(e){$('#form-error').textContent=uiError(e.message);return;}
@@ -172,13 +205,14 @@ document.addEventListener('click', async e => {
     if(button.id==='copy-again')copyForChatGPT({...inputValues(),source:'manual'});
     if(button.id==='copy-fallback') {await navigator.clipboard.writeText($('#copy-text').value);toast('Copied. Paste it into your AI app.');}
     if(button.id==='connect-empty')connectionSettings();
-    if(button.id==='stop'){await api('stop',{});await refresh();toast('Queued tasks stopped. Images already generating will finish.');}
-    if(button.id==='delete-key'){await api('key',{});state=await api('state');source='personal';localStorage.setItem('source',source);render();connectionSettings();toast('API key deleted. API generation is paused.');}
+    if(button.id==='stop'&&isDirect()){for(const r of direct.rows)if(r.status==='queued'){r.status='failed';r.error='Stopped before generating.';}render();toast('Queued tasks stopped. Images already generating will finish.');}
+    else if(button.id==='stop'){await api('stop',{});await refresh();toast('Queued tasks stopped. Images already generating will finish.');}
+    if(button.id==='delete-key'){if(isDirect())directKey.set('');else await api('key',{});state=withDirect(await api('state'));source='personal';localStorage.setItem('source',source);render();connectionSettings();toast('API key deleted. API generation is paused.');}
     if(button.dataset.copy){const row=state.rows.find(r=>r.id===button.dataset.copy);await navigator.clipboard.writeText(row.prompt);toast('Image prompt copied.');}
     if(button.dataset.upload)upload(button.dataset.upload);
     if(button.dataset.regenerate){
       const row=state.rows.find(r=>r.id===button.dataset.regenerate), selectedSource=row.source==='manual'?'mock':row.source||source;
-      const run=async()=>{button.disabled=true;try{await api('generate',{ids:[row.id],source:selectedSource,requestId:crypto.randomUUID()});await refresh();}catch(e){button.disabled=false;toast(uiError(e.message));}};
+      const run=async()=>{if(isDirect()){await directRequest(row);return;}button.disabled=true;try{await api('generate',{ids:[row.id],source:selectedSource,requestId:crypto.randomUUID()});await refresh();}catch(e){button.disabled=false;toast(uiError(e.message));}};
       if(['personal','company'].includes(selectedSource)) {modal(`<h2>Generate another photo?</h2><p>Source: ${sourceNames[selectedSource]} · Billed to: ${selectedSource==='company'?'Company':'Your API account'}<br>Cost estimate unavailable. Your original photo will be kept.</p><div class="buttons"><button data-close>Cancel</button><button class="primary" id="confirm-regenerate">Generate</button></div>`);$('#confirm-regenerate').onclick=()=>{$('#modal').close();run();};}else await run();
     }
   }catch(error){toast(uiError(error.message));}
@@ -187,14 +221,15 @@ document.addEventListener('change',async e=>{
   const t=e.target;
   if(t.dataset.backgroundLeaf||t.dataset.backgroundGroup){const ids=t.dataset.backgroundGroup?backgroundLeaves(t.dataset.backgroundGroup):[t.dataset.backgroundLeaf];ids.forEach(id=>t.checked?selectedBackgrounds.add(id):selectedBackgrounds.delete(id));updateBackgroundPicker();localStorage.setItem('simple-draft',JSON.stringify(inputValues()));updateSummary();}
   if(t.name==='source'){$('#key-section').hidden=t.value!=='personal';$('#company-section').hidden=t.value!=='company'||!!state.account;}
-  if(t.dataset.version){try{await api('version',{id:t.dataset.version,version:t.value});await refresh();}catch(e){toast(uiError(e.message));}}
+  if(t.dataset.version&&isDirect()){const r=state.rows.find(x=>x.id===t.dataset.version);r.active=t.value;render();}
+  else if(t.dataset.version){try{await api('version',{id:t.dataset.version,version:t.value});await refresh();}catch(e){toast(uiError(e.message));}}
 });
 document.addEventListener('submit',async e=>{
   if(e.target.id!=='connection-form')return;e.preventDefault();const button=e.target.querySelector('button.primary');button.disabled=true;
   try{const values=Object.fromEntries(new FormData(e.target));
-    if(values.source==='personal'){if(values.key.trim())await api('key',{key:values.key.trim()});else if(!state.keyReady)throw Error('Enter an API key to generate photos.');}
+    if(values.source==='personal'){if(values.key.trim()){if(isDirect()){if(values.key.trim().length<20)throw Error('請輸入有效 API Key');directKey.set(values.key.trim());}else await api('key',{key:values.key.trim()});}else if(!state.keyReady)throw Error('Enter an API key to generate photos.');}
     if(values.source==='company'&&!state.account)await api('login',{username:values.username,password:values.password});
-    source=values.source;localStorage.setItem('source',source);state=await api('state');$('#modal').close();showHistory=false;render();toast('Generation method saved.');
+    source=values.source;localStorage.setItem('source',source);state=withDirect(await api('state'));$('#modal').close();showHistory=false;render();toast('Generation method saved.');
   }catch(error){$('#connection-error').textContent=uiError(error.message);}finally{button.disabled=false;}
 });
 async function upload(id){const input=document.createElement('input');input.type='file';input.accept='image/png,image/jpeg,image/webp';input.onchange=async()=>{try{const file=input.files[0];if(!file)return;if(file.size>10e6)throw Error('Images must be 10 MB or smaller.');const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file);});await api('upload',{id,image:data});await refresh();toast('Photo saved.');}catch(e){toast(uiError(e.message));}};input.click();}
@@ -203,9 +238,9 @@ function download(content,name,type='application/json'){const a=document.createE
 function csv(rows){const fields=['id','category','scene','purpose','prompt','width','height','status'];return '\uFEFF'+[fields,...rows.map(r=>fields.map(f=>r[f]??''))].map(row=>row.map(x=>'"'+String(x).replace(/^[=+@-]/,m=>"'"+m).replaceAll('"','""')+'"').join(',')).join('\r\n')}
 
 function zip(files){const enc=new TextEncoder(),parts=[],central=[];let offset=0;const u16=(v,n)=>v.setUint16(n[0],n[1],true),u32=(v,o,n)=>v.setUint32(o,n>>>0,true);for(const f of files){let name=enc.encode(f.name),bytes=f.bytes,crc=0xffffffff;for(let b of bytes){crc^=b;for(let i=0;i<8;i++)crc=(crc>>>1)^((crc&1)?0xedb88320:0)}crc=(crc^0xffffffff)>>>0;const h=new Uint8Array(30+name.length),d=new DataView(h.buffer);u32(d,0,0x04034b50);u16(d,[4,20]);u16(d,[6,0x800]);u32(d,14,crc);u32(d,18,bytes.length);u32(d,22,bytes.length);u16(d,[26,name.length]);h.set(name,30);parts.push(h,bytes);const c=new Uint8Array(46+name.length),v=new DataView(c.buffer);u32(v,0,0x02014b50);u16(v,[4,20]);u16(v,[6,20]);u16(v,[8,0x800]);u32(v,16,crc);u32(v,20,bytes.length);u32(v,24,bytes.length);u16(v,[28,name.length]);u32(v,42,offset);c.set(name,46);central.push(c);offset+=h.length+bytes.length}const size=central.reduce((a,c)=>a+c.length,0),end=new Uint8Array(22),v=new DataView(end.buffer);u32(v,0,0x06054b50);u16(v,[8,files.length]);u16(v,[10,files.length]);u32(v,12,size);u32(v,16,offset);return new Blob([...parts,...central,end],{type:'application/zip'})}
-async function downloadAll(){const rows=currentRows().filter(r=>r.active);if(!rows.length)return;$('#download-all').disabled=true;toast('Preparing your download…');try{const files=[];for(const row of rows){const version=row.versions.find(v=>v.id===row.active),response=await fetch(imageURL(row));if(!response.ok)throw Error('Download failed. Please try again.');files.push({name:`${row.id}_${version.source}_v${row.versions.indexOf(version)+1}.${version.ext}`,bytes:new Uint8Array(await response.arrayBuffer())});}const enc=new TextEncoder();files.push({name:'manifest.json',bytes:enc.encode(JSON.stringify({request:state.latestBatch,rows},null,2))},{name:'manifest.csv',bytes:enc.encode(csv(rows))});download(zip(files),'sample-images.zip');toast(`${rows.length} photos packed and ready.`);}finally{$('#download-all').disabled=false;}}
+async function downloadAll(){const rows=currentRows().filter(r=>r.active);if(!rows.length)return;$('#download-all').disabled=true;toast('Preparing your download…');try{const files=[];for(const row of rows){const version=row.versions.find(v=>v.id===row.active),response=await fetch(imageURL(row));if(!response.ok)throw Error('Download failed. Please try again.');files.push({name:`${row.id}_${version.source}_v${row.versions.indexOf(version)+1}.${version.ext}`,bytes:new Uint8Array(await response.arrayBuffer())});}const enc=new TextEncoder();files.push({name:'manifest.json',bytes:enc.encode(JSON.stringify({request:state.latestBatch,rows:rows.map(({input,versions,...r})=>({...r,versions:versions.map(({dataUrl,...v})=>v)}))},null,2))},{name:'manifest.csv',bytes:enc.encode(csv(rows))});download(zip(files),'sample-images.zip');toast(`${rows.length} photos packed and ready.`);}finally{$('#download-all').disabled=false;}}
 try{
-  state=await api('state');
+  state=withDirect(await api('state'));
   if(localStorage.getItem('chatgpt-copy-flow')!=='1'){source='manual';localStorage.setItem('chatgpt-copy-flow','1');localStorage.setItem('source',source);}
   if(!Object.hasOwn(sourceNames,source)||source==='company'&&!state.companyReady){source='manual';localStorage.setItem('source',source);}
   let draft;try{draft=JSON.parse(localStorage.getItem('simple-draft'));}catch{}
@@ -216,5 +251,6 @@ try{
   document.querySelectorAll('.ai-app-links').forEach(el=>el.innerHTML=aiAppLinks());
   document.querySelector('.color-swatches').innerHTML=backgroundSwatches.map(c=>`<button type="button" data-swatch="${c}" style="background:${c}" aria-label="${colorName(c)}" title="${colorName(c)}"></button>`).join('');
   ['aspect-ratio','clothing-style','season','product-type','angle'].forEach(id=>enhanceSelect($('#'+id)));
-  render();setInterval(async()=>{try{if(!$('#modal').open&&!submitting)await refresh();}catch{}},1500);
+  render();setInterval(async()=>{try{if(!$('#modal').open&&!submitting&&!isDirect())await refresh();}catch{}},1500);
+  addEventListener('beforeunload',e=>{if(isDirect()&&direct.rows.some(r=>r.versions.length)){e.preventDefault();e.returnValue='';}});
 }catch(e){$('#form-error').textContent='Cannot connect. Please check that the server is running.';}

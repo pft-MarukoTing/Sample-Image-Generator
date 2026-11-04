@@ -108,9 +108,11 @@ The deployment filesystem (`/var/task`) is read-only. Setting `DATA_DIR=data` or
 
 - The homepage, filters, prompt copying, and Open ChatGPT / Open Gemini work normally.
 - Form preferences remain in that browser's localStorage. Clearing browser data removes them; they are not synced across devices.
-- Images and History are **not stored by this deployment**, even temporarily. Generate and download photos in ChatGPT/Gemini. This app cannot retrieve that platform's photo history.
+- Images and History are **not stored by this deployment**, even temporarily. With Copy prompt, generate and download photos in your AI app; this app cannot retrieve that platform's photo history.
 - `/api/state` returns an empty workspace with explicit storage capabilities; no workspace cookie or server file is created.
-- My API key is disabled, company mode is unavailable, and the backend rejects writes/uploads/key submissions/generation with `503 DURABLE_STORAGE_REQUIRED`, before accepting credentials or calling any paid provider. Advanced settings show an explanation.
+- **My API key works without storage.** The key is kept only in that browser tab (`sessionStorage`) and sent with each `POST /api/direct` request, which plans one image, calls OpenAI with that key, and returns the image as WebP. The server stores no key, image, job, or History; photos stay in the tab until it is closed, so download them first. The browser runs two requests at a time.
+- Company mode is unavailable, and every other write/upload/key/batch endpoint returns `503 DURABLE_STORAGE_REQUIRED` before accepting credentials or calling any paid provider. Advanced settings show an explanation.
+- Each `/api/direct` call generates one image synchronously, so the function's maximum duration must cover one OpenAI image request (often 30–60 s or more). Vercel's default limit with Fluid compute is enough; raise it if requests time out.
 - Existing local `data/` remains unchanged and is never uploaded to Git/Vercel. Setting API environment variables alone does not enable hosted paid generation.
 
 Push to the linked production branch to trigger Vercel's existing Git integration. Use Node.js 22 or newer; do not configure a start command or output directory. The checked-in `builds`/`routes` configuration selects the Node function. For a custom domain not included in Vercel's production URL variables, add its hostname to `ALLOWED_HOSTS` and redeploy. No new storage subscription or credentials are required for this stateless release.

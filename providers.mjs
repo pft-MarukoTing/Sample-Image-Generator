@@ -12,15 +12,15 @@ function mock(r){
 
 export const providers={
   mock:{async generate({row}){await new Promise(a=>setTimeout(a,1000));if(row.simulateFailure)throw Error('模擬失敗：用於驗證失敗重試，不涉及 API 或費用。');return {bytes:mock(row),ext:'svg'}}},
-  personal:{async generate({row,settings,key,fetcher=fetch}){
+  personal:{async generate({row,settings,key,format='png',fetcher=fetch}){
     if(!key)throw Error('個人 Key 已過期或已刪除，請重新設定。');
     const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),180000);
-    try{const payload={model:process.env.OPENAI_IMAGE_MODEL||'gpt-image-2',prompt:compilePrompt(row,settings),n:1,size:`${row.width}x${row.height}`,output_format:'png'};
+    try{const payload={model:process.env.OPENAI_IMAGE_MODEL||'gpt-image-2',prompt:compilePrompt(row,settings),n:1,size:`${row.width}x${row.height}`,output_format:format};
     let endpoint='https://api.openai.com/v1/images/generations',body=JSON.stringify(payload),headers={Authorization:`Bearer ${key}`,'Content-Type':'application/json'};
     if(settings.reference){const match=/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/.exec(settings.reference);if(!match)throw Error('參考圖片格式無效');const form=new FormData();for(const [name,value]of Object.entries(payload))form.append(name,String(value));form.append('image',new Blob([Buffer.from(match[2],'base64')],{type:`image/${match[1]}`}),`reference.${match[1]}`);endpoint='https://api.openai.com/v1/images/edits';body=form;headers={Authorization:`Bearer ${key}`};}
     const response=await fetcher(endpoint,{method:'POST',headers,body,signal:controller.signal});
     if(!response.ok)throw Error(`OpenAI 回應 ${response.status}；請檢查額度、模型與尺寸，未自動重試。`);
-    const result=await response.json();if(!result.data?.[0]?.b64_json)throw Error('API 未回傳可用圖片');return {bytes:Buffer.from(result.data[0].b64_json,'base64'),ext:'png'};
+    const result=await response.json();if(!result.data?.[0]?.b64_json)throw Error('API 未回傳可用圖片');return {bytes:Buffer.from(result.data[0].b64_json,'base64'),ext:format};
     }catch(e){if(e.name==='AbortError')throw Error('API 請求逾時；可能已計費，請先檢查供應商紀錄再重試。');if(e instanceof TypeError)throw Error('API 連線失敗；請檢查網路，確認帳務後再重試。');throw e}finally{clearTimeout(timer)}
   }}
 };

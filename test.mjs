@@ -51,6 +51,10 @@ const prompt=buildChatGPTPrompt(input);assert.match(prompt,/exactly 2 people/);a
 assert.equal(planBatch({...input,peopleCount:undefined},'ONE').config.peopleCount,1);assert.match(planBatch({...input,peopleCount:'1'},'ONE').rows[0].prompt,/只有一個人/);
 assert.throws(()=>planBatch({...input,peopleCount:'5'},'BAD'),/1 to 4 people/);assert.throws(()=>buildChatGPTPrompt({...input,peopleCount:'0'}),/1 to 4 people/);
 });
+test('provider honours the requested output format',async()=>{let payload;const fetcher=async(url,opts)=>{payload=JSON.parse(opts.body);return {ok:true,json:async()=>({data:[{b64_json:Buffer.from('img').toString('base64')}]})};};
+const result=await providers.personal.generate({row:{prompt:'p',width:1024,height:1024},settings:{},key:'k',format:'webp',fetcher});assert.equal(payload.output_format,'webp');assert.equal(result.ext,'webp');
+assert.equal((await providers.personal.generate({row:{prompt:'p',width:1024,height:1024},settings:{},key:'k',fetcher})).ext,'png');
+});
 test('regional background hierarchy supports parent selection without duplicates',()=>{
 assert.deepEqual(normalizeBackgrounds(['east-asia','japan']),['japan','korea','taiwan','china']);assert.equal(backgroundSummary(['asia']),'Asian');assert.equal(backgroundLeaves('asia').length,13);assert.equal(backgroundSummary([]),'Any ethnicity');assert.throws(()=>normalizeBackgrounds(['invalid']),/valid regional/);assert.equal(resolveBackground({regionalBackgrounds:['asia']},1).id,'vietnam');assert.equal(resolveBackground({regionalBackgrounds:['asia']},2).id,'india');
 const input={requirement:'閉眼睛',count:4,ageMin:26,ageMax:35,background:'clean',gender:'mixed',framing:'half',regionalBackgrounds:['japan','korea','taiwan']};const batch=planBatch(input,'BG');assert.deepEqual(batch.rows.map(r=>r.regionalBackground),['japan','korea','taiwan','japan']);assert.deepEqual(batch.config.regionalBackgrounds,input.regionalBackgrounds);assert.match(buildChatGPTPrompt(input),/Japanese background/);assert.match(buildChatGPTPrompt(input),/Korean background/);assert.match(buildChatGPTPrompt(input),/Taiwanese background/);assert.ok(batch.rows.every(r=>r.prompt.includes('do not assume one fixed appearance')));assert.equal(resolveBackground({}).id,null);
@@ -89,12 +93,18 @@ test('Vercel entry: read-only filesystem, homepage/assets, stateless privacy and
   assert.equal((await call('/',undefined,{host:'untrusted.example'})).status,403);
   assert.equal((await call('/api/state',undefined,{origin:'https://untrusted.example'})).status,403);
   const response=await call('/api/state');assert.equal(response.status,200);assert.equal(response.headers.get('set-cookie'),null);
-  const state=await response.json();assert.equal(state.storage.persistent,false);assert.equal(state.storage.mode,'stateless');assert.equal(state.storage.apiGenerationAvailable,false);assert.equal(state.companyReady,false);assert.equal(state.keyReady,false);assert.deepEqual(state.rows,[]);
+  const state=await response.json();assert.equal(state.storage.persistent,false);assert.equal(state.storage.mode,'stateless');assert.equal(state.storage.apiGenerationAvailable,false);assert.equal(state.storage.directApiAvailable,true);assert.equal(state.companyReady,false);assert.equal(state.keyReady,false);assert.deepEqual(state.rows,[]);
   for(const route of ['key','batch','generate','save','upload','login','quota']){
     const r=await call('/api/'+route,{source:'personal',key:'must-not-save',requestId:'vercel-test'}, {origin:'https://sample.example.com'});
     assert.equal(r.status,503,route);assert.equal((await r.json()).code,'DURABLE_STORAGE_REQUIRED');
   }
   assert.equal((await call('/api/image?id=private&v=private')).status,503);
+  // Direct generation validates the key and the form before any provider call; OPENAI_API_KEY is never used.
+  const origin={origin:'https://sample.example.com'};
+  let direct=await call('/api/direct',{key:'short',input:{},index:0},origin);assert.equal(direct.status,400);assert.match((await direct.json()).error,/API Key/);
+  direct=await call('/api/direct',{key:'sk-test-key-that-is-long-enough',input:{requirement:'',count:1},index:0},origin);assert.equal(direct.status,400);
+  direct=await call('/api/direct',{key:'sk-test-key-that-is-long-enough',input:{requirement:'Wavy',count:1,ageMin:20,ageMax:30,gender:'female',background:'clean',framing:'half'},index:5},origin);assert.equal(direct.status,400);
+  assert.equal((await call('/api/direct',undefined,origin)).status,405);
   assert.deepEqual((await (await call('/api/state')).json()).rows,[]);
   assert.equal(errors,'');
 });
